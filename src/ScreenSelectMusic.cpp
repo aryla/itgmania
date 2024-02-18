@@ -482,30 +482,6 @@ bool ScreenSelectMusic::Input( const InputEventPlus &input )
 		return true;
 	}
 
-	// toggle sync manager
-	if (input.DeviceI.device == DEVICE_KEYBOARD && input.DeviceI.button == KEY_F10)
-	{
-		if (input.type != IET_FIRST_PRESS)
-			return false;
-
-		if (SYNCMAN->isEnabled())
-		{
-			SYNCMAN->disable();
-			LOG->Info("Synchronized start disabled");
-			SCREENMAN->SystemMessage("Synchronized start disabled");
-			g_bSampleMusicWaiting = true;
-			return true;
-		}
-		else
-		{
-			SYNCMAN->enable();
-			LOG->Info( "Synchronized start enabled" );
-			SCREENMAN->SystemMessage("Synchronized start enabled");
-			SOUND->StopMusic();
-			return true;
-		}
-	}
-
 	if( !IsTransitioning() && m_SelectionState != SelectionState_Finalized )
 	{
 		bool bHoldingCtrl =

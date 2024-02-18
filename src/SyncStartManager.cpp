@@ -95,6 +95,8 @@ SyncStartManager::SyncStartManager()
 	this->socketfd = -1;
 	this->enabled = false;
     this->machinesLoadingNextSongCounter = 0;
+
+	this->enable();
 }
 
 SyncStartManager::~SyncStartManager()
