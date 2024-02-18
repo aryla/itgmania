@@ -167,12 +167,20 @@ void SyncStartManager::broadcastStarting()
 	}
 }
 
+void SyncStartManager::broadcastSelectedSongOrCourse(const std::string& songOrCourse) {
+	if (lastBroadcastedSongOrCourse != songOrCourse)
+	{
+		this->broadcast(SONG, songOrCourse);
+		lastBroadcastedSongOrCourse = songOrCourse;
+	}
+}
+
 void SyncStartManager::broadcastSelectedSong(const Song& song) {
-	this->broadcast(SONG, SongToString(song));
+	this->broadcastSelectedSongOrCourse(SongToString(song));
 }
 
 void SyncStartManager::broadcastSelectedCourse(const Course& course) {
-	this->broadcast(SONG, CourseToString(course));
+	this->broadcastSelectedSongOrCourse(CourseToString(course));
 }
 
 void SyncStartManager::broadcastScoreChange(const PlayerStageStats& pPlayerStageStats) {
@@ -336,6 +344,7 @@ void SyncStartManager::Update() {
 
 			if (opcode == SONG && this->waitingForSongChanges) {
 				this->songOrCourseWaitingToBeChangedTo = msg;
+				this->lastBroadcastedSongOrCourse = msg;
 			} else if (opcode == START && this->waitingForSynchronizedStarting) {
 				if (msg == activeSyncStartSong) {
 					this->shouldStart = true;
@@ -368,6 +377,7 @@ void SyncStartManager::ListenForSongChanges(bool enabled) {
 	LOG->Info("Listen for song changes: %d", enabled);
 	this->waitingForSongChanges = enabled;
 	this->songOrCourseWaitingToBeChangedTo = "";
+	this->lastBroadcastedSongOrCourse = "";
 }
 
 std::string SyncStartManager::GetSongOrCourseToChangeTo() {

@@ -16,10 +16,12 @@ private:
 	int socketfd;
 	bool enabled;
 	void broadcast(char code, const std::string& msg);
+	void broadcastSelectedSongOrCourse(const std::string& songOrCourse);
 	int getNextMessage(char* buffer, sockaddr_in* remaddr, size_t bufferSize);
 
 	bool waitingForSongChanges;
 	std::string songOrCourseWaitingToBeChangedTo;
+	std::string lastBroadcastedSongOrCourse;
 	bool waitingForSynchronizedStarting;
 	std::string activeSyncStartSong;
 	bool shouldStart;
