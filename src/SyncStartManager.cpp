@@ -142,7 +142,7 @@ void SyncStartManager::broadcast(char code, const std::string& msg) {
 	struct sockaddr_in addr;
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(PORT);
-	addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+	addr.sin_addr.s_addr = inet_addr("127.255.255.255");
 
 	// first byte is code, rest is the message
 	char buffer[BUFSIZE];
