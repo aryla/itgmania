@@ -100,6 +100,7 @@ struct MusicToPlay
 	bool bForceLoop;
 	float fStartSecond, fLengthSeconds, fFadeInLengthSeconds, fFadeOutLengthSeconds;
 	bool bAlignBeat, bApplyMusicRate;
+	std::int64_t iSyncHardwareFrame;
 	MusicToPlay()
 	{
 		HasTiming = false;
@@ -228,7 +229,7 @@ static void StartMusic( MusicToPlay &ToPlay )
 		StartImmediately = true;
 
 	RageTimer when; /* zero */
-	if( !StartImmediately )
+	if( !StartImmediately && ToPlay.iSyncHardwareFrame != 0 )
 	{
 		/* GetPlayLatency returns the minimum time until a sound starts.  That's
 		 * common when starting a precached sound, but our sound isn't, so it'll
@@ -267,6 +268,7 @@ static void StartMusic( MusicToPlay &ToPlay )
 		p.m_LengthSeconds = ToPlay.fLengthSeconds;
 		p.m_fFadeInSeconds = ToPlay.fFadeInLengthSeconds;
 		p.m_fFadeOutSeconds = ToPlay.fFadeOutLengthSeconds;
+		p.m_iSyncHardwareFrame = ToPlay.iSyncHardwareFrame;
 		p.m_StartTime = when;
 		if( ToPlay.bForceLoop )
 			p.StopMode = RageSoundParams::M_LOOP;
@@ -706,7 +708,8 @@ void GameSoundManager::PlayMusic(
 	float fFadeInLengthSeconds,
 	float fFadeOutLengthSeconds,
 	bool bAlignBeat,
-	bool bApplyMusicRate
+	bool bApplyMusicRate,
+	std::int64_t iSyncHardwareFrame
 	)
 {
 	PlayMusicParams params;
@@ -719,6 +722,7 @@ void GameSoundManager::PlayMusic(
 	params.fFadeOutLengthSeconds = fFadeOutLengthSeconds;
 	params.bAlignBeat = bAlignBeat;
 	params.bApplyMusicRate = bApplyMusicRate;
+	params.iSyncHardwareFrame = iSyncHardwareFrame;
 	PlayMusic( params );
 }
 
@@ -750,6 +754,7 @@ void GameSoundManager::PlayMusic( PlayMusicParams params, PlayMusicParams Fallba
 	ToPlay.fFadeOutLengthSeconds = params.fFadeOutLengthSeconds;
 	ToPlay.bAlignBeat = params.bAlignBeat;
 	ToPlay.bApplyMusicRate = params.bApplyMusicRate;
+	ToPlay.iSyncHardwareFrame = params.iSyncHardwareFrame;
 
 	/* Add the MusicToPlay to the g_MusicsToPlay queue. */
 	g_Mutex->Lock();

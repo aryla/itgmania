@@ -158,6 +158,7 @@ void SyncStartManager::broadcastSelectedSongOrCourse(const std::string& songOrCo
 		LOG->Info("Broadcasting SyncStartSongSelected song %s", songOrCourse.c_str());
 		broadcastMessage(this->socketfd, SyncStartSongSelected, songOrCourse);
 		this->lastBroadcastedSongOrCourse = songOrCourse;
+		this->shouldPreview = false;
 	}
 }
 
@@ -269,7 +270,7 @@ void SyncStartManager::Update()
 				{
 					this->shouldPreview = false;
 					this->previewSong = song;
-					this->previewSongMachinesWaiting = 1;
+					this->previewSongMachinesWaiting = MACHINES - 1;
 					this->previewSongStartFrame = startFrame;
 				}
 				else
@@ -324,7 +325,7 @@ std::string SyncStartManager::GetSongOrCourseToChangeTo()
 
 bool SyncStartManager::AttemptPreview(std::int64_t& startFrame)
 {
-    if (!this->shouldPreview) return false;
+    if( !this->shouldPreview ) return false;
 	startFrame = this->previewSongStartFrame;
 	this->shouldPreview = false;
 	return true;
@@ -332,7 +333,7 @@ bool SyncStartManager::AttemptPreview(std::int64_t& startFrame)
 
 bool SyncStartManager::AttemptStart(std::int64_t& startFrame)
 {
-    if (!this->shouldStart) return false;
+    if( !this->shouldStart ) return false;
 	startFrame = this->activeSongStartFrame;
 	this->shouldStart = false;
 	return true;

@@ -29,6 +29,7 @@ public:
 			fFadeOutLengthSeconds = 0;
 			bAlignBeat = true;
 			bApplyMusicRate = false;
+			iSyncHardwareFrame = 0;
 		}
 
 		RString sFile;
@@ -40,18 +41,20 @@ public:
 		float fFadeOutLengthSeconds;
 		bool bAlignBeat;
 		bool bApplyMusicRate;
+		std::int64_t iSyncHardwareFrame;
 	};
 	void PlayMusic( PlayMusicParams params, PlayMusicParams FallbackMusicParams = PlayMusicParams() );
-	void PlayMusic( 
-		RString sFile, 
-		const TimingData *pTiming = nullptr, 
-		bool force_loop = false, 
-		float start_sec = 0, 
-		float length_sec = -1, 
+	void PlayMusic(
+		RString sFile,
+		const TimingData *pTiming = nullptr,
+		bool force_loop = false,
+		float start_sec = 0,
+		float length_sec = -1,
 		float fFadeInLengthSeconds = 0,
-		float fade_len = 0, 
+		float fade_len = 0,
 		bool align_beat = true,
-		bool bApplyMusicRate = false );
+		bool bApplyMusicRate = false,
+		std::int64_t iSyncHardwareFrame = 0 );
 	void StopMusic() { PlayMusic(""); }
 	void DimMusic( float fVolume, float fDurationSeconds );
 	RString GetMusicPath() const;

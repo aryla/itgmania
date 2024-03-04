@@ -31,6 +31,8 @@
 #include "RageInput.h"
 #include "OptionsList.h"
 #include "RageFileManager.h"
+#include "RageSoundManager.h"
+#include "SyncStartManager.h"
 
 #include <cmath>
 #include <vector>
@@ -63,6 +65,8 @@ static bool g_bCDTitleWaiting = false;
 static RString g_sBannerPath;
 static bool g_bBannerWaiting = false;
 static bool g_bSampleMusicWaiting = false;
+static bool g_bBroadcastMusicWaiting = false;
+static RString g_sLastBroadcastedSampleMusic = "";
 static RageTimer g_StartedLoadingAt(RageZeroTimer);
 static RageTimer g_ScreenStartedLoadingAt(RageZeroTimer);
 RageTimer g_CanOpenOptionsList(RageZeroTimer);
@@ -360,6 +364,48 @@ void ScreenSelectMusic::CheckBackgroundRequests( bool bForce )
 			m_BackgroundLoader.FinishedWithCachedFile( g_sBannerPath );
 	}
 
+	if ( g_bBroadcastMusicWaiting )
+	{
+		// Don't select the song when moving fast.
+		if (g_StartedLoadingAt.Ago() < SAMPLE_MUSIC_DELAY)
+		return;
+
+		g_bBroadcastMusicWaiting = false;
+
+		float fSampleMusicDelay = std::max({
+			0.1f,
+			SAMPLE_MUSIC_DELAY_INIT - g_ScreenStartedLoadingAt.Ago(),
+			SAMPLE_MUSIC_DELAY - g_StartedLoadingAt.Ago(),
+		});
+
+		std::int64_t iSampleMusicStartFrame =
+			SOUNDMAN->GetPosition( nullptr ) +
+			(int64_t)(fSampleMusicDelay * SOUNDMAN->GetDriverSampleRate());
+
+		Course* pCourse = m_MusicWheel.GetSelectedCourse();
+		Song* pSong = m_MusicWheel.GetSelectedSong();
+		if( pSong != nullptr )
+		{
+			SYNCMAN->broadcastSelectedSong(*pSong);
+			RString sSongPath = pSong->GetPreviewMusicPath();
+			if( sSongPath != g_sLastBroadcastedSampleMusic )
+			{
+				SYNCMAN->broadcastReadyToPreviewSong(*pSong, iSampleMusicStartFrame);
+				g_sLastBroadcastedSampleMusic = sSongPath;
+			}
+		}
+		else if( pCourse != nullptr )
+		{
+			SYNCMAN->broadcastSelectedCourse(*pCourse);
+			RString sCoursePath = pCourse->m_sPath;
+			if( sCoursePath != g_sLastBroadcastedSampleMusic )
+			{
+				SYNCMAN->broadcastReadyToPreviewCourse(*pCourse, iSampleMusicStartFrame);
+				g_sLastBroadcastedSampleMusic = sCoursePath;
+			}
+		}
+	}
+
 	// Nothing else is going.  Start the music, if we haven't yet.
 	if( g_bSampleMusicWaiting )
 	{
@@ -370,24 +416,34 @@ void ScreenSelectMusic::CheckBackgroundRequests( bool bForce )
 		if( g_StartedLoadingAt.Ago() < SAMPLE_MUSIC_DELAY && !bForce )
 			return;
 
-		g_bSampleMusicWaiting = false;
+		std::int64_t startFrame;
+		if( SYNCMAN->AttemptPreview(startFrame) )
+		{
+			g_bSampleMusicWaiting = false;
 
-		GameSoundManager::PlayMusicParams PlayParams;
-		PlayParams.sFile = HandleLuaMusicFile(m_sSampleMusicToPlay);
-		PlayParams.pTiming = m_pSampleMusicTimingData;
-		PlayParams.bForceLoop = SAMPLE_MUSIC_LOOPS;
-		PlayParams.fStartSecond = m_fSampleStartSeconds;
-		PlayParams.fLengthSeconds = m_fSampleLengthSeconds;
-		PlayParams.fFadeOutLengthSeconds = SAMPLE_MUSIC_FADE_OUT_SECONDS;
-		PlayParams.bAlignBeat = ALIGN_MUSIC_BEATS;
-		PlayParams.bApplyMusicRate = true;
+			GameSoundManager::PlayMusicParams PlayParams;
+			PlayParams.sFile = HandleLuaMusicFile(m_sSampleMusicToPlay);
+			PlayParams.pTiming = m_pSampleMusicTimingData;
+			PlayParams.bForceLoop = SAMPLE_MUSIC_LOOPS;
+			PlayParams.fStartSecond = m_fSampleStartSeconds;
+			PlayParams.fLengthSeconds = m_fSampleLengthSeconds;
+			PlayParams.fFadeOutLengthSeconds = SAMPLE_MUSIC_FADE_OUT_SECONDS;
+			PlayParams.bAlignBeat = ALIGN_MUSIC_BEATS;
+			PlayParams.bApplyMusicRate = true;
+			PlayParams.iSyncHardwareFrame = startFrame;
 
-		GameSoundManager::PlayMusicParams FallbackMusic;
-		FallbackMusic.sFile = m_sLoopMusicPath;
-		FallbackMusic.fFadeInLengthSeconds = SAMPLE_MUSIC_FALLBACK_FADE_IN_SECONDS;
-		FallbackMusic.bAlignBeat = ALIGN_MUSIC_BEATS;
+			GameSoundManager::PlayMusicParams FallbackMusic;
+			FallbackMusic.sFile = m_sLoopMusicPath;
+			FallbackMusic.fFadeInLengthSeconds = SAMPLE_MUSIC_FALLBACK_FADE_IN_SECONDS;
+			FallbackMusic.bAlignBeat = ALIGN_MUSIC_BEATS;
 
-		SOUND->PlayMusic( PlayParams, FallbackMusic );
+			LOG->Info(
+				"Previewing %s at frame %ld",
+				PlayParams.sFile.c_str(),
+				startFrame);
+
+			SOUND->PlayMusic( PlayParams, FallbackMusic );
+		}
 	}
 }
 
@@ -403,6 +459,51 @@ void ScreenSelectMusic::Update( float fDeltaTime )
 	}
 
 	ScreenWithMenuElements::Update( fDeltaTime );
+
+	std::string songOrCoursePath = SYNCMAN->GetSongOrCourseToChangeTo();
+	if( !songOrCoursePath.empty() )
+	{
+		LOG->Info(
+			"Received song/course \"%s\"",
+			songOrCoursePath.c_str());
+		bool found = false;
+		bool changed = false;
+
+		if( GAMESTATE->IsCourseMode() )
+		{
+			Course* course = SONGMAN->FindCourse(songOrCoursePath);
+			if( course != nullptr )
+			{
+				found = true;
+				changed = m_MusicWheel.SelectCourse(course);
+			}
+		}
+		else
+		{
+			Song* song = SONGMAN->FindSong(songOrCoursePath);
+			if( song != nullptr )
+			{
+				found = true;
+				changed = m_MusicWheel.SelectSong(song);
+			}
+		}
+
+		if( !found )
+		{
+			LOG->Info(
+				"Didn't find \"%s\" in music wheel",
+				songOrCoursePath.c_str());
+		}
+
+		if( changed )
+		{
+			m_MusicWheel.Select();
+			m_MusicWheel.Move(-1);
+			m_MusicWheel.Move(1);
+			m_MusicWheel.Select();
+			AfterMusicChange();
+		}
+	}
 
 	CheckBackgroundRequests( false );
 }
@@ -1943,6 +2044,8 @@ void ScreenSelectMusic::AfterMusicChange()
 	// Cancel any previous, incomplete requests for song assets,
 	// since we need new ones.
 	m_BackgroundLoader.Abort();
+
+	g_bBroadcastMusicWaiting = true;
 
 	g_bCDTitleWaiting = false;
 	if( !g_sCDTitlePath.empty() || g_bWantFallbackCdTitle )
