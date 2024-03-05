@@ -51,6 +51,7 @@ struct EventDevice
 	EventDevice();
 	~EventDevice();
 	bool Open( RString sFile, InputDevice dev );
+	bool Reopen();
 	bool IsOpen() const { return m_iFD != -1; }
 	void Close()
 	{
@@ -86,7 +87,12 @@ bool EventDevice::Open( RString sFile, InputDevice dev )
 {
 	m_sPath = sFile;
 	m_Dev = dev;
-	m_iFD = open( sFile, O_RDWR );
+	return Reopen();
+}
+
+bool EventDevice::Reopen()
+{
+	m_iFD = open( m_sPath, O_RDWR );
 	if( m_iFD == -1 )
 	{
 		// HACK: Let the caller handle errno.
@@ -123,7 +129,7 @@ bool EventDevice::Open( RString sFile, InputDevice dev )
 	}
 	else
 	{
-		LOG->Info( "Input device: %s: %s device, ID %04x:%04x, version %x: %s", sFile.c_str(),
+		LOG->Info( "Input device: %s: %s device, ID %04x:%04x, version %x: %s", m_sPath.c_str(),
 			BustypeToString(DevInfo.bustype).c_str(), DevInfo.vendor, DevInfo.product,
 			DevInfo.version, m_sName.c_str() );
 	}
@@ -343,6 +349,16 @@ void InputHandler_Linux_Event::InputThread()
 		FD_ZERO( &fdset );
 		int iMaxFD = -1;
 
+		// Try to reopen closed devices.
+		for( int i = 0; i < (int) g_apEventDevices.size(); ++i )
+		{
+			if( g_apEventDevices[i]->IsOpen() )
+				continue;
+
+			if( g_apEventDevices[i]->Reopen() )
+				LOG->Info( "Reopened %s", g_apEventDevices[i]->m_sPath.c_str() );
+		}
+
 		for( int i = 0; i < (int) g_apEventDevices.size(); ++i )
 		{
 			int iFD = g_apEventDevices[i]->m_iFD;
@@ -354,7 +370,10 @@ void InputHandler_Linux_Event::InputThread()
 		}
 
 		if( iMaxFD == -1 )
-			break;
+		{
+			usleep( 100000 );
+			continue;
+		}
 
 		struct timeval zero = {0,100000};
 		if( select(iMaxFD+1, &fdset, nullptr, nullptr, &zero) <= 0 )
