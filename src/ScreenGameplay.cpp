@@ -1600,7 +1600,11 @@ void ScreenGameplay::BeginScreen()
 
 void ScreenGameplay::EndScreen()
 {
-	m_bWaitingForSyncStart = false;
+	if( m_bWaitingForSyncStart )
+	{
+		m_bWaitingForSyncStart = false;
+		SCREENMAN->HideSystemMessage();
+	}
 	SYNCMAN->EndCurrentSong();
 }
 
@@ -2421,6 +2425,20 @@ bool ScreenGameplay::Input( const InputEventPlus &input )
 	Message msg("");
 	if( m_Codes.InputMessage(input, msg) )
 		this->HandleMessage( msg );
+
+	if( m_bWaitingForSyncStart )
+	{
+		if( input.type == IET_FIRST_PRESS &&
+			input.MenuI == GAME_BUTTON_BACK )
+		{
+			SYNCMAN->EndCurrentSong();
+			LOG->Trace("Player %i went back", input.pn+1);
+			BeginBackingOutFromGameplay();
+			return true;
+		}
+
+		return false;
+	}
 
 	if( m_bPaused )
 	{
