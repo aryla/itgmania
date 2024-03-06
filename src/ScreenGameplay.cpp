@@ -2,6 +2,7 @@
 #include "ScreenGameplay.h"
 #include "SongManager.h"
 #include "ScreenManager.h"
+#include "SyncStartManager.h"
 #include "GameConstantsAndTypes.h"
 #include "PrefsManager.h"
 #include "GamePreferences.h"
@@ -60,12 +61,10 @@
 #include "XmlFileUtil.h"
 #include "Profile.h" // for replay data stuff
 #include "RageDisplay.h"
-#include "SyncStartManager.h"
 
 #include <cmath>
 #include <cstddef>
 #include <vector>
-#include <cstdlib>
 
 // Defines
 #define SHOW_LIFE_METER_FOR_DISABLED_PLAYERS	THEME->GetMetricB(m_sName,"ShowLifeMeterForDisabledPlayers")
@@ -331,7 +330,6 @@ ScreenGameplay::ScreenGameplay()
 	m_delaying_ready_announce= false;
 	m_bWaitingForSyncStart = false;
 	GAMESTATE->m_AdjustTokensBySongCostForFinalStageCheck= false;
-	m_bSongReadySent = false;
 }
 
 void ScreenGameplay::Init()
@@ -1365,11 +1363,6 @@ void ScreenGameplay::LoadNextSong()
 	}
 
 	MESSAGEMAN->Broadcast("DoneLoadingNextSong");
-
-	if (SYNCMAN->isEnabled() && pSong != nullptr)
-	{
-		SYNCMAN->SongChangedDuringGameplay(*pSong);
-	}
 }
 
 void ScreenGameplay::LoadLights()
@@ -1451,7 +1444,7 @@ void ScreenGameplay::LoadLights()
 	NoteDataUtil::LoadTransformedLights( TapNoteData1, m_CabinetLightsNoteData, GAMEMAN->GetStepsTypeInfo(StepsType_lights_cabinet).iNumTracks );
 }
 
-void ScreenGameplay::StartPlayingSong( float fMinTimeToNotes, float fMinTimeToMusic )
+void ScreenGameplay::StartPlayingSong( float fMinTimeToNotes, float fMinTimeToMusic, std::int64_t startFrame )
 {
 	ASSERT( fMinTimeToNotes >= 0 );
 	ASSERT( fMinTimeToMusic >= 0 );
@@ -1461,6 +1454,7 @@ void ScreenGameplay::StartPlayingSong( float fMinTimeToNotes, float fMinTimeToMu
 	RageSoundParams p;
 	p.m_fSpeed = GAMESTATE->m_SongOptions.GetCurrent().m_fMusicRate;
 	p.StopMode = RageSoundParams::M_CONTINUE;
+	p.m_iSyncHardwareFrame = startFrame;
 
 	{
 		const float fFirstSecond = GAMESTATE->m_pCurSong->GetFirstSecond();
@@ -1588,22 +1582,26 @@ void ScreenGameplay::BeginScreen()
 
 	SOUND->PlayOnceFromAnnouncer( "gameplay intro" );	// crowd cheer
 
-	if (SYNCMAN->isEnabled() && GAMESTATE->m_pCurSong != nullptr)
+	StartPlayingSong( MIN_SECONDS_TO_STEP, MIN_SECONDS_TO_MUSIC );
+
+	if( SYNCMAN->isEnabled() )
 	{
-		SYNCMAN->StartListeningForSynchronizedStart(*GAMESTATE->m_pCurSong);
-		StartPlayingSong(0, 0);
-		m_pSoundMusic->Stop();
+		m_pSoundMusic->StopPlaying();
+		((RageSoundBase*)m_pSoundMusic)->SoundIsFinishedPlaying();
+
+		std::int64_t startFrame =
+			SOUNDMAN->GetPosition( nullptr ) +
+			(int64_t)(0.1f * SOUNDMAN->GetDriverSampleRate());
+		SYNCMAN->broadcastReadyToStartSong(*GAMESTATE->m_pCurSong, startFrame);
+
 		m_bWaitingForSyncStart = true;
-	}
-	else
-	{
-		StartPlayingSong( MIN_SECONDS_TO_STEP, MIN_SECONDS_TO_MUSIC );
 	}
 }
 
 void ScreenGameplay::EndScreen()
 {
-	SYNCMAN->StopListeningForSynchronizedStart();
+	m_bWaitingForSyncStart = false;
+	SYNCMAN->EndCurrentSong();
 }
 
 bool ScreenGameplay::AllAreFailing()
@@ -1656,52 +1654,21 @@ void ScreenGameplay::Update( float fDeltaTime )
 		return;
 	}
 
-	if (m_bWaitingForSyncStart)
+	if( m_bWaitingForSyncStart )
 	{
-		m_fTimeWaiting += fDeltaTime;
-
-		if (GAMESTATE->IsCourseMode() && GAMESTATE->GetCourseSongIndex() > 0 && !m_bSongReadySent && m_fTimeWaiting > 2.0f)
-		{
-			SYNCMAN->broadcastMarathonSongReady();
-			m_bSongReadySent = true;
-		}
-
-		if (SYNCMAN->AttemptStart())
+		std::int64_t startFrame;
+		if( SYNCMAN->AttemptStart(startFrame) )
 		{
 			m_bWaitingForSyncStart = false;
 			SCREENMAN->HideSystemMessage();
-
-			RageSoundParams p;
-			p.m_fSpeed = GAMESTATE->m_SongOptions.GetCurrent().m_fMusicRate;
-			p.StopMode = RageSoundParams::M_CONTINUE;
-			const float fFirstSecond = GAMESTATE->m_pCurSong->GetFirstSecond();
-			float fStartDelay = MIN_SECONDS_TO_STEP - fFirstSecond;
-			fStartDelay = fmax(fStartDelay, (float) MIN_SECONDS_TO_MUSIC);
-			p.m_StartSecond = -fStartDelay;
-			m_pSoundMusic->Play(false, &p);
-			UpdateSongPosition(0);
-			Screen::Update(0);
-
-			// send initial score
-			for (auto pi = GetNextEnabledPlayerInfo(m_vPlayerInfo.begin(), m_vPlayerInfo); pi != m_vPlayerInfo.end(); pi = GetNextEnabledPlayerInfo(++pi, m_vPlayerInfo))
-			{
-				SYNCMAN->broadcastScoreChange(*pi->GetPlayerStageStats());
-			}
-
-			return;
+			LOG->Info("Starting %s at frame %ld", GAMESTATE->m_pCurSong->GetSongFilePath().c_str(), startFrame);
+			StartPlayingSong( MIN_SECONDS_TO_STEP, MIN_SECONDS_TO_MUSIC, startFrame );
 		}
 		else
 		{
-			if (GAMESTATE->IsCourseMode() && GAMESTATE->GetCourseSongIndex() > 0)
-			{
-				SCREENMAN->SystemMessageNoAnimate("Wait...");
-			}
-			else
-			{
-				SCREENMAN->SystemMessageNoAnimate("Waiting for synchronized start - press START to begin on all machines!");
-			}
-
-			Screen::Update(0);
+			SCREENMAN->SystemMessageNoAnimate("Waiting for synchronized start...");
+			UpdateSongPosition( 0 );
+			Screen::Update( 0 );
 		}
 	}
 
@@ -2389,7 +2356,6 @@ void ScreenGameplay::SendCrossedMessages()
 
 void ScreenGameplay::BeginBackingOutFromGameplay()
 {
-	m_bWaitingForSyncStart = false;
 	m_DancingState = STATE_OUTRO;
 	ResetGiveUpTimers(false);
 
@@ -2455,12 +2421,6 @@ bool ScreenGameplay::Input( const InputEventPlus &input )
 	Message msg("");
 	if( m_Codes.InputMessage(input, msg) )
 		this->HandleMessage( msg );
-
-	if (m_bWaitingForSyncStart && input.MenuI == GAME_BUTTON_START && input.type == IET_FIRST_PRESS)
-	{
-		SYNCMAN->broadcastStarting();
-		return true;
-	}
 
 	if( m_bPaused )
 	{
@@ -2981,10 +2941,6 @@ void ScreenGameplay::HandleScreenMessage( const ScreenMessage SM )
 
 		MESSAGEMAN->Broadcast( "ChangeCourseSongOut" );
 
-		SYNCMAN->broadcastMarathonSongLoading();
-		m_bSongReadySent = false;
-		m_fTimeWaiting = 0;
-
 		GAMESTATE->m_bLoadingNextSong = false;
 		LoadNextSong();
 
@@ -2992,14 +2948,7 @@ void ScreenGameplay::HandleScreenMessage( const ScreenMessage SM )
 		m_NextSong.PlayCommand( "Finish" );
 		m_NextSong.StartTransitioning( SM_None );
 
-		if (SYNCMAN->isEnabled())
-		{
-			m_bWaitingForSyncStart = true;
-		}
-		else
-		{
-			StartPlayingSong(MIN_SECONDS_TO_STEP_NEXT_SONG, 0);
-		}
+		StartPlayingSong( MIN_SECONDS_TO_STEP_NEXT_SONG, 0 );
 	}
 	else if( SM == SM_PlayToasty )
 	{
@@ -3159,7 +3108,6 @@ void ScreenGameplay::HandleMessage( const Message &msg )
 void ScreenGameplay::Cancel( ScreenMessage smSendWhenDone )
 {
 	m_pSoundMusic->Stop();
-	m_bWaitingForSyncStart = false;
 
 	ScreenWithMenuElements::Cancel( smSendWhenDone );
 }

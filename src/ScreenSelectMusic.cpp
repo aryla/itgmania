@@ -31,7 +31,6 @@
 #include "RageInput.h"
 #include "OptionsList.h"
 #include "RageFileManager.h"
-#include "SyncStartManager.h"
 
 #include <cmath>
 #include <vector>
@@ -64,11 +63,8 @@ static bool g_bCDTitleWaiting = false;
 static RString g_sBannerPath;
 static bool g_bBannerWaiting = false;
 static bool g_bSampleMusicWaiting = false;
-static bool g_bBroadcastMusicWaiting = false;
-static bool g_bSyncStartSampleMusicWaiting = false;
 static RageTimer g_StartedLoadingAt(RageZeroTimer);
 static RageTimer g_ScreenStartedLoadingAt(RageZeroTimer);
-static RageTimer g_WaitForSyncStartSampleMusic(RageZeroTimer);
 RageTimer g_CanOpenOptionsList(RageZeroTimer);
 
 static LocalizedString PERMANENTLY_DELETE("ScreenSelectMusic", "PermanentlyDelete");
@@ -291,15 +287,8 @@ void ScreenSelectMusic::BeginScreen()
 	AfterMusicChange();
 
 	SOUND->PlayOnceFromAnnouncer( "select music intro" );
-	SYNCMAN->StopListeningScoreChanges();
-	SYNCMAN->ListenForSongChanges(true);
 
 	ScreenWithMenuElements::BeginScreen();
-}
-
-void ScreenSelectMusic::EndScreen()
-{
-	SYNCMAN->ListenForSongChanges(false);
 }
 
 ScreenSelectMusic::~ScreenSelectMusic()
@@ -371,38 +360,14 @@ void ScreenSelectMusic::CheckBackgroundRequests( bool bForce )
 			m_BackgroundLoader.FinishedWithCachedFile( g_sBannerPath );
 	}
 
-	if ( g_bBroadcastMusicWaiting )
-	{
-		// Don't select the song when moving fast.
-		if (g_StartedLoadingAt.Ago() < SAMPLE_MUSIC_DELAY)
-			return;
-
-		g_bBroadcastMusicWaiting = false;
-
-		Course* pCourse = m_MusicWheel.GetSelectedCourse();
-		Song* pSong = m_MusicWheel.GetSelectedSong();
-		if (pSong != nullptr)
-		{
-			SYNCMAN->broadcastSelectedSong(*pSong);
-		}
-		else if (pCourse != nullptr)
-		{
-			SYNCMAN->broadcastSelectedCourse(*pCourse);
-		}
-	}
-
 	// Nothing else is going.  Start the music, if we haven't yet.
 	if( g_bSampleMusicWaiting )
 	{
-		if (!SYNCMAN->isEnabled() && g_ScreenStartedLoadingAt.Ago() < SAMPLE_MUSIC_DELAY_INIT)
+		if(g_ScreenStartedLoadingAt.Ago() < SAMPLE_MUSIC_DELAY_INIT)
 			return;
 
 		// Don't start the music sample when moving fast.
-		if (!SYNCMAN->isEnabled() && g_StartedLoadingAt.Ago() < SAMPLE_MUSIC_DELAY && !bForce)
-			return;
-
-		// Don't start the preview when syncstart is enabled and not forcing
-		if (SYNCMAN->isEnabled() && (!g_bSyncStartSampleMusicWaiting || g_WaitForSyncStartSampleMusic.Ago() < SAMPLE_MUSIC_DELAY))
+		if( g_StartedLoadingAt.Ago() < SAMPLE_MUSIC_DELAY && !bForce )
 			return;
 
 		g_bSampleMusicWaiting = false;
@@ -438,36 +403,6 @@ void ScreenSelectMusic::Update( float fDeltaTime )
 	}
 
 	ScreenWithMenuElements::Update( fDeltaTime );
-
-	std::string songOrCoursePath = SYNCMAN->GetSongOrCourseToChangeTo();
-
-	if (!songOrCoursePath.empty()) {
-		LOG->Info("Received song/course '%s'", songOrCoursePath.c_str());
-		bool changed = false;
-
-		if (GAMESTATE->IsCourseMode()) {
-			Course* course = SONGMAN->FindCourse(songOrCoursePath);
-			if (course != nullptr && course != m_MusicWheel.GetSelectedCourse()) {
-				changed = m_MusicWheel.SelectCourse(course);
-			}
-		} else {
-			Song* song = SONGMAN->FindSong(songOrCoursePath);
-			if (song != nullptr && song != m_MusicWheel.GetSelectedSong()) {
-				changed = m_MusicWheel.SelectSong(song);
-			}
-		}
-
-		if (changed) {
-			LOG->Info("Found received song/course from music wheel");
-			m_MusicWheel.Select();
-			m_MusicWheel.Move(-1);
-			m_MusicWheel.Move(1);
-			m_MusicWheel.Select();
-			AfterMusicChange();
-			g_bSyncStartSampleMusicWaiting = true;
-			g_WaitForSyncStartSampleMusic.Touch();
-		}
-	}
 
 	CheckBackgroundRequests( false );
 }
@@ -2008,8 +1943,6 @@ void ScreenSelectMusic::AfterMusicChange()
 	// Cancel any previous, incomplete requests for song assets,
 	// since we need new ones.
 	m_BackgroundLoader.Abort();
-
-	g_bBroadcastMusicWaiting = true;
 
 	g_bCDTitleWaiting = false;
 	if( !g_sCDTitlePath.empty() || g_bWantFallbackCdTitle )

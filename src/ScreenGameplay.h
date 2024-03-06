@@ -220,7 +220,7 @@ protected:
 	void SetupSong( int iSongIndex );
 	void ReloadCurrentSong();
 	virtual void LoadNextSong();
-	void StartPlayingSong( float fMinTimeToNotes, float fMinTimeToMusic );
+	void StartPlayingSong( float fMinTimeToNotes, float fMinTimeToMusic, std::int64_t startFrame = 0 );
 	void GetMusicEndTiming( float &fSecondsToStartFadingOutMusic, float &fSecondsToStartTransitioningOut );
 	void LoadLights();
 	void PauseGame( bool bPause, GameController gc = GameController_Invalid );
@@ -334,11 +334,6 @@ protected:
 	bool m_delaying_ready_announce;
 
 	bool m_bWaitingForSyncStart;
-
-	// Time we have waited after finishing a song in marathon mode
-	float m_fTimeWaiting;
-
-	bool m_bSongReadySent;
 };
 
 std::vector<PlayerInfo>::iterator GetNextEnabledPlayerInfo		( std::vector<PlayerInfo>::iterator iter, std::vector<PlayerInfo> &v );

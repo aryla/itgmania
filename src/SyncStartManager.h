@@ -14,49 +14,42 @@ class SyncStartManager
 {
 private:
 	int socketfd;
-	bool enabled;
-	void broadcast(char code, const std::string& msg);
-	void broadcastSelectedSongOrCourse(const std::string& songOrCourse);
-	int getNextMessage(char* buffer, sockaddr_in* remaddr, size_t bufferSize);
 
-	bool waitingForSongChanges;
 	std::string songOrCourseWaitingToBeChangedTo;
 	std::string lastBroadcastedSongOrCourse;
-	bool waitingForSynchronizedStarting;
-	std::string activeSyncStartSong;
-	bool shouldStart;
-    int machinesLoadingNextSongCounter;
 
-	SyncStartScoreKeeper syncStartScoreKeeper;
+	std::string previewSong;
+	std::int64_t previewSongStartFrame;
+	int previewSongMachinesWaiting;
+	bool shouldPreview;
+
+	std::string activeSong;
+	std::int64_t activeSongStartFrame;
+	int activeSongMachinesWaiting;
+	bool shouldStart;
+
+	void broadcastSelectedSongOrCourse(const std::string& songOrCourse);
+
 public:
 	SyncStartManager();
 	~SyncStartManager();
+
+	bool bShouldStall;
+
 	bool isEnabled() const;
-	void enable();
-	void disable();
-	void broadcastStarting();
+
 	void broadcastSelectedSong(const Song& song);
 	void broadcastSelectedCourse(const Course& course);
-	void broadcastScoreChange(const PlayerStageStats& pPlayerStageStats);
-    void broadcastFinalScore(const PlayerStageStats& pPlayerStageStats);
-    void broadcastFinalCourseScore(const PlayerStageStats& pPlayerStageStats);
-	[[nodiscard]] std::stringstream writeScoreMessage(const PlayerStageStats& pPlayerStageStats, bool isCourseScore) const;
-    void broadcastMarathonSongLoading();
-    void broadcastMarathonSongReady();
-	void receiveScoreChange(struct in_addr in_addr, const std::string& msg);
-	std::vector<SyncStartScore> GetCurrentPlayerScores();
-	std::vector<SyncStartScore> GetLatestPlayerScores();
-	void Update();
-	void ListenForSongChanges(bool enabled);
-	std::string GetSongOrCourseToChangeTo();
-	void StartListeningForSynchronizedStart(const Song& song);
-	void StopListeningForSynchronizedStart();
-	bool AttemptStart();
-	void StopListeningScoreChanges();
-	void SongChangedDuringGameplay(const Song& song);
+	void broadcastReadyToStartSong(const Song& song, std::int64_t startFrame);
+	void broadcastReadyToStartCourse(const Course& course, std::int64_t startFrame);
+	void broadcastReadyToPreviewSong(const Song& song, std::int64_t startFrame);
+	void broadcastReadyToPreviewCourse(const Course& course, std::int64_t startFrame);
+	void EndCurrentSong();
 
-	// Lua
-	void PushSelf( lua_State *L );
+	void Update();
+	std::string GetSongOrCourseToChangeTo();
+	bool AttemptStart(std::int64_t& startFrame);
+	bool AttemptPreview(std::int64_t& startFrame);
 };
 
 extern SyncStartManager *SYNCMAN;

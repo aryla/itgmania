@@ -21,6 +21,7 @@ public:
 	virtual int GetDataToPlay( float *buffer, int size, std::int64_t &iStreamFrame, int &got_bytes ) = 0;
 	virtual void CommitPlayingPosition( std::int64_t iFrameno, std::int64_t iPosition, int iBytesRead ) = 0;
 	virtual RageTimer GetStartTime() const { return RageZeroTimer; }
+	virtual int64_t GetSyncHardwareFrame() const { return 0; }
 	virtual RString GetLoadedFilePath() const = 0;
 };
 
@@ -54,6 +55,10 @@ struct RageSoundParams
 	/* Optional driver feature: time to actually start playing sounds.
 	 * If zero, or if not supported, the sound will start immediately. */
 	RageTimer m_StartTime;
+
+	/* When nonzero, indicates the hardware frame which the first stream frame of
+	 * the sound should be played on. */
+	int64_t m_iSyncHardwareFrame;
 
 	/** @brief How does the sound stop itself, if it does? */
 	enum StopMode_t {
@@ -137,6 +142,7 @@ public:
 
 	float GetPlaybackRate() const;
 	RageTimer GetStartTime() const;
+	int64_t GetSyncHardwareFrame() const;
 	void SetParams( const RageSoundParams &p );
 	const RageSoundParams &GetParams() const { return m_Param; }
 	bool SetProperty( const RString &sProperty, float fValue );

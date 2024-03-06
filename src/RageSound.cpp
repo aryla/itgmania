@@ -45,6 +45,7 @@ RageSoundParams::RageSoundParams():
 	m_StartSecond(0), m_LengthSeconds(-1), m_fFadeInSeconds(0),
 	m_fFadeOutSeconds(0), m_Volume(1.0f), m_fAttractVolume(1.0f),
 	m_fPitch(1.0f), m_fSpeed(1.0f), m_StartTime( RageZeroTimer ),
+	m_iSyncHardwareFrame(0),
 	StopMode(M_AUTO), m_bIsCriticalSound(false) {}
 
 RageSoundLoadParams::RageSoundLoadParams():
@@ -566,6 +567,11 @@ float RageSound::GetPlaybackRate() const
 RageTimer RageSound::GetStartTime() const
 {
 	return m_Param.m_StartTime;
+}
+
+int64_t RageSound::GetSyncHardwareFrame() const
+{
+	return m_Param.m_iSyncHardwareFrame;
 }
 
 void RageSound::SetParams( const RageSoundParams &p )

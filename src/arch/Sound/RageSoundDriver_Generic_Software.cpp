@@ -87,8 +87,18 @@ RageSoundMixBuffer &RageSoundDriver::MixIntoBuffer( int iFrames, std::int64_t iF
 		int iGotFrames = 0;
 		int iFramesLeft = iFrames;
 
+		if( s.m_iSyncHardwareFrame != 0 )
+		{
+			if( s.m_iSyncHardwareFrame > iFrameNumber )
+			{
+				/* If the sound is supposed to start at a time past this buffer, insert silence. */
+				const int iSilentFramesInThisBuffer = clamp( int(s.m_iSyncHardwareFrame - iFrameNumber), 0, iFramesLeft );
+				iGotFrames += iSilentFramesInThisBuffer;
+				iFramesLeft -= iSilentFramesInThisBuffer;
+			}
+		}
 		/* Does the sound have a start time? */
-		if( !s.m_StartTime.IsZero() && iCurrentFrame != -1 )
+		else if( !s.m_StartTime.IsZero() && iCurrentFrame != -1 )
 		{
 			/* If the sound is supposed to start at a time past this buffer, insert silence. */
 			const std::int64_t iFramesUntilThisBuffer = iFrameNumber - iCurrentFrame;
@@ -125,6 +135,18 @@ RageSoundMixBuffer &RageSoundDriver::MixIntoBuffer( int iFrames, std::int64_t iF
 				/* We've used up p[0].  Try p[1]. */
 				std::swap( p[0], p[1] );
 				std::swap( pSize[0], pSize[1] );
+				continue;
+			}
+
+			if( s.m_iSyncHardwareFrame != 0 &&
+				s.m_iSyncHardwareFrame + p[0]->m_iPosition < iFrameNumber + iGotFrames )
+			{
+				const int framesToSkip = std::min<int>(
+					p[0]->m_FramesInBuffer,
+					s.m_iSyncHardwareFrame + p[0]->m_iPosition - iFrameNumber - iGotFrames);
+				p[0]->m_BufferNext += framesToSkip*channels;
+				p[0]->m_FramesInBuffer -= framesToSkip;
+				p[0]->m_iPosition += framesToSkip;
 				continue;
 			}
 
@@ -336,6 +358,7 @@ void RageSoundDriver::StartMixing( RageSoundBase *pSound )
 
 	s.m_pSound = pSound;
 	s.m_StartTime = pSound->GetStartTime();
+	s.m_iSyncHardwareFrame = pSound->GetSyncHardwareFrame();
 	s.m_Buffer.clear();
 
 	/* Initialize the sound buffer. */

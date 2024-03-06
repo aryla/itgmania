@@ -169,6 +169,7 @@ private:
 		void Deallocate();
 
 		RageSoundBase *m_pSound;
+		std::int64_t m_iSyncHardwareFrame;
 		RageTimer m_StartTime;
 		CircBuf<sound_block> m_Buffer;
 

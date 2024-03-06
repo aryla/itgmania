@@ -34,6 +34,8 @@ static Preference<bool> g_bNeverBoostAppPriority( "NeverBoostAppPriority", false
  * jumps on frame skips. 0 to disable. */
 static Preference<float> g_fConstantUpdateDeltaSeconds( "ConstantUpdateDeltaSeconds", 0 );
 
+static int g_iSyncStartStallCounter = 0;
+
 void HandleInputEvents( float fDeltaTime );
 
 static float g_fUpdateRate = 1;
@@ -276,18 +278,30 @@ void GameLoop::UpdateAllButDraw(bool bRunningFromVBLANK)
 
 	fDeltaTime *= g_fUpdateRate;
 
-	// Update SOUNDMAN early (before any RageSound::GetPosition calls), to flush position data.
-	SOUNDMAN->Update();
-
-	/* Update song beat information -before- calling update on all the classes that
-	* depend on it. If you don't do this first, the classes are all acting on old
-	* information and will lag. (but no longer fatally, due to timestamping -glenn) */
-	SOUND->Update(fDeltaTime);
-	TEXTUREMAN->Update(fDeltaTime);
-	GAMESTATE->Update(fDeltaTime);
-	SCREENMAN->Update(fDeltaTime);
-	MEMCARDMAN->Update();
 	SYNCMAN->Update();
+	if( SYNCMAN->bShouldStall )
+	{
+		g_iSyncStartStallCounter++;
+	}
+	else
+	{
+		g_iSyncStartStallCounter = 0;
+	}
+
+	if( g_iSyncStartStallCounter < 2 )
+	{
+		// Update SOUNDMAN early (before any RageSound::GetPosition calls), to flush position data.
+		SOUNDMAN->Update();
+
+		/* Update song beat information -before- calling update on all the classes that
+		* depend on it. If you don't do this first, the classes are all acting on old
+		* information and will lag. (but no longer fatally, due to timestamping -glenn) */
+		SOUND->Update(fDeltaTime);
+		TEXTUREMAN->Update(fDeltaTime);
+		GAMESTATE->Update(fDeltaTime);
+		SCREENMAN->Update(fDeltaTime);
+		MEMCARDMAN->Update();
+	}
 
 	/* Important: Process input AFTER updating game logic, or input will be
 	* acting on song beat from last frame */
@@ -295,8 +309,12 @@ void GameLoop::UpdateAllButDraw(bool bRunningFromVBLANK)
 
 	//bandaid for low max audio sample counter
 	SOUNDMAN->low_sample_count_workaround();
-	LIGHTSMAN->Update(fDeltaTime);
 
+	if( g_iSyncStartStallCounter < 2 )
+	{
+		//bandaid for low max audio sample counter
+		LIGHTSMAN->Update(fDeltaTime);
+	}
 }
 
 

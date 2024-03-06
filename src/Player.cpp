@@ -40,7 +40,6 @@
 #include "GameCommand.h"
 #include "LocalizedString.h"
 #include "AdjustSync.h"
-#include "SyncStartManager.h"
 
 #include <cmath>
 #include <cstddef>
@@ -834,8 +833,6 @@ void Player::Update( float fDeltaTime )
 	if( !m_bLoaded )
 		return;
 
-	this->m_bBroadcastScoreThisUpdate = false;
-
 	//LOG->Trace( "Player::Update(%f)", fDeltaTime );
 
 	if( GAMESTATE->m_pCurSong== nullptr || IsOniDead() )
@@ -1197,10 +1194,6 @@ void Player::Update( float fDeltaTime )
 	}
 	// process transforms that are waiting to be applied
 	ApplyWaitingTransforms();
-
-    if (m_bBroadcastScoreThisUpdate && SYNCMAN->isEnabled() && m_pPlayerStageStats) {
-        SYNCMAN->broadcastScoreChange(*m_pPlayerStageStats);
-    }
 }
 
 // Update a group of holds with shared scoring/life. All of these holds will have the same start row.
@@ -1595,7 +1588,6 @@ void Player::UpdateHoldNotes( int iSongRow, float fDeltaTime, std::vector<TrackR
 		TapNote &tn = *vTN[0].pTN;
 		SetHoldJudgment( tn, iFirstTrackWithMaxEndRow );
 		HandleHoldScore( tn );
-        this->m_bBroadcastScoreThisUpdate = true;
 		//LOG->Trace("hold result = %s",StringConversion::ToString(tn.HoldResult.hns).c_str());
 	}
 	//LOG->Trace("[Player::UpdateHoldNotes] ends");
@@ -2046,7 +2038,6 @@ void Player::ScoreAllActiveHoldsLetGo()
 					tn.HoldResult.fLife = 0;
 
 					SetHoldJudgment( tn, iTrack );
-                    this->m_bBroadcastScoreThisUpdate = true;
 					HandleHoldScore( tn );
 				}
 			}
@@ -2741,7 +2732,6 @@ void Player::UpdateJudgedRows()
 					SetJudgment( iRow, m_NoteData.GetFirstTrackWithTapOrHoldHead(iRow), NoteDataWithScoring::LastTapNoteWithResult( m_NoteData, iRow ) );
 				}
 				HandleTapRowScore( iRow );
-                this->m_bBroadcastScoreThisUpdate = true;
 			}
 		}
 	}
@@ -2782,11 +2772,9 @@ void Player::UpdateJudgedRows()
 			case TNS_AvoidMine:
 				SetMineJudgment( tn.result.tns , iter.Track() );
 				tn.result.bHidden= true;
-                this->m_bBroadcastScoreThisUpdate = true;
 				continue;
 			case TNS_HitMine:
 				SetMineJudgment( tn.result.tns , iter.Track() );
-                this->m_bBroadcastScoreThisUpdate = true;
 				break;
 			}
 			if( m_pNoteField )

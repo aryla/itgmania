@@ -21,23 +21,19 @@ SyncStartManager *SYNCMAN;
 
 #define BUFSIZE 1024
 #define PORT 53000
+#define MACHINES 2
 
-// opcodes
+enum SyncStartOpcode : std::uint8_t
+{
+	SyncStartSongSelected = 0,
+	SyncStartReadyToPreview = 1,
+	SyncStartReadyToStart = 2,
+};
 
-#define START 0x00
-#define SONG 0x01
-#define SCORE 0x02
-#define MARATHON_SONG_LOADING 0x03
-#define MARATHON_SONG_READY 0x04
-#define FINAL_SCORE 0x05
-#define FINAL_COURSE_SCORE 0x06
-
-#define MISC_ITEMS_LENGTH 10
-#define ALL_ITEMS_LENGTH (MISC_ITEMS_LENGTH + NUM_TapNoteScore + NUM_HoldNoteScore)
-
-std::vector<std::string> split(const std::string& str, const std::string& delim) {
+std::vector<std::string> split(const std::string& str, const std::string& delim)
+{
 	std::vector<std::string> tokens;
-	tokens.reserve(ALL_ITEMS_LENGTH);
+	tokens.reserve(10);
 	size_t prev = 0, pos = 0;
 
 	do
@@ -53,7 +49,8 @@ std::vector<std::string> split(const std::string& str, const std::string& delim)
 	return tokens;
 }
 
-std::string SongToString(const Song& song) {
+std::string SongToString(const Song& song)
+{
 	RString sDir = song.GetSongDir();
 	sDir.Replace("\\","/");
 	std::vector<RString> bits;
@@ -62,8 +59,10 @@ std::string SongToString(const Song& song) {
 	return song.m_sGroupName + '/' + *bits.rbegin();
 }
 
-std::string CourseToString(const Course& course) {
-	if (course.m_sPath.empty()) {
+std::string CourseToString(const Course& course)
+{
+	if( course.m_sPath.empty() )
+	{
 		return "";
 	}
 
@@ -75,43 +74,23 @@ std::string CourseToString(const Course& course) {
 	return course.m_sGroupName + '/' + *bits.rbegin();
 }
 
-std::string formatScore(const PlayerStageStats& pPlayerStageStats) {
-	return ssprintf("%.*f",
-			(int) CommonMetrics::PERCENT_SCORE_DECIMAL_PLACES,
-			pPlayerStageStats.GetPercentDancePoints() * 100 );
-}
+SyncStartManager::SyncStartManager():
+	socketfd(-1),
+	songOrCourseWaitingToBeChangedTo(""),
+	lastBroadcastedSongOrCourse(""),
 
-SyncStartManager::SyncStartManager()
+	previewSong(""),
+    previewSongStartFrame(0),
+	previewSongMachinesWaiting(MACHINES),
+	shouldPreview(false),
+
+	activeSong(""),
+    activeSongStartFrame(0),
+	activeSongMachinesWaiting(MACHINES),
+	shouldStart(false),
+
+	bShouldStall(false)
 {
-	// Register with Lua.
-	{
-		Lua *L = LUA->Get();
-		lua_pushstring( L, "SYNCMAN" );
-		this->PushSelf( L );
-		lua_settable(L, LUA_GLOBALSINDEX);
-		LUA->Release( L );
-	}
-
-	this->socketfd = -1;
-	this->enabled = false;
-    this->machinesLoadingNextSongCounter = 0;
-
-	this->enable();
-}
-
-SyncStartManager::~SyncStartManager()
-{
-	this->disable();
-}
-
-bool SyncStartManager::isEnabled() const
-{
-	return this->enabled;
-}
-
-void SyncStartManager::enable()
-{
-	// initialize
 	this->socketfd = socket(AF_INET, SOCK_DGRAM, 0);
 
 	struct sockaddr_in addr;
@@ -125,376 +104,236 @@ void SyncStartManager::enable()
 		setsockopt(this->socketfd, SOL_SOCKET, SO_BROADCAST, &enableOpt, sizeof(enableOpt)) == -1 ||
 		setsockopt(this->socketfd, SOL_SOCKET, SO_REUSEADDR, &enableOpt, sizeof(enableOpt)) == -1 ||
 		setsockopt(this->socketfd, SOL_SOCKET, SO_REUSEPORT, &enableOpt, sizeof(enableOpt)) == -1
-	) {
+	)
+	{
 		return;
 	}
 
-	if (bind(this->socketfd, (const struct sockaddr *)&addr, (socklen_t)sizeof(addr)) < 0) {
+	if( bind(this->socketfd, (const struct sockaddr *)&addr, (socklen_t)sizeof(addr)) < 0 )
+	{
 		return;
 	}
-
-	this->enabled = true;
 }
 
-void SyncStartManager::broadcast(char code, const std::string& msg) {
-	if (!this->enabled) {
-		return;
+SyncStartManager::~SyncStartManager()
+{
+	if( this->socketfd >= 0 )
+	{
+		shutdown(this->socketfd, SHUT_RDWR);
+		close(this->socketfd);
+		this->socketfd = -1;
 	}
+}
 
+bool SyncStartManager::isEnabled() const
+{
+	return true;
+}
+
+static void broadcast(int socketfd, const char* msg, const size_t msg_len)
+{
 	struct sockaddr_in addr;
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(PORT);
 	addr.sin_addr.s_addr = inet_addr("127.255.255.255");
 
-	// first byte is code, rest is the message
-	char buffer[BUFSIZE];
-	buffer[0] = code;
-	std::size_t length = msg.copy(buffer + 1, BUFSIZE - 1, 0);
-
-	#ifdef DEBUG
-		LOG->Info("BROADCASTING: code %d, msg: '%s'", code, msg.c_str());
-	#endif
-
-	if (sendto(this->socketfd, &buffer, length + 1, 0, (struct sockaddr *) &addr, sizeof(addr)) == -1) {
-		return;
-	}
-}
-
-void SyncStartManager::broadcastStarting()
-{
-	if (!this->activeSyncStartSong.empty()) {
-		this->broadcast(START, this->activeSyncStartSong);
-	}
-}
-
-void SyncStartManager::broadcastSelectedSongOrCourse(const std::string& songOrCourse) {
-	if (lastBroadcastedSongOrCourse != songOrCourse)
+	if( sendto(socketfd, msg, msg_len, 0, (struct sockaddr *) &addr, sizeof(addr)) == -1 )
 	{
-		this->broadcast(SONG, songOrCourse);
-		lastBroadcastedSongOrCourse = songOrCourse;
+		LOG->Warn("sendto() returned -1");
 	}
 }
 
-void SyncStartManager::broadcastSelectedSong(const Song& song) {
+static void broadcastMessage(int socketfd, const SyncStartOpcode opcode, const std::string message)
+{
+	char buffer[BUFSIZE];
+	buffer[0] = opcode;
+	std::size_t length = message.copy(buffer + 1, BUFSIZE - 1, 0);
+	broadcast(socketfd, buffer, length + 1);
+}
+
+void SyncStartManager::broadcastSelectedSongOrCourse(const std::string& songOrCourse)
+{
+	if( this->lastBroadcastedSongOrCourse != songOrCourse )
+	{
+		LOG->Info("Broadcasting SyncStartSongSelected song %s", songOrCourse.c_str());
+		broadcastMessage(this->socketfd, SyncStartSongSelected, songOrCourse);
+		this->lastBroadcastedSongOrCourse = songOrCourse;
+	}
+}
+
+void SyncStartManager::broadcastSelectedSong(const Song& song)
+{
 	this->broadcastSelectedSongOrCourse(SongToString(song));
 }
 
-void SyncStartManager::broadcastSelectedCourse(const Course& course) {
+void SyncStartManager::broadcastSelectedCourse(const Course& course)
+{
 	this->broadcastSelectedSongOrCourse(CourseToString(course));
 }
 
-void SyncStartManager::broadcastScoreChange(const PlayerStageStats& pPlayerStageStats) {
-	std::stringstream msg = writeScoreMessage(pPlayerStageStats, false);
-    this->broadcast(SCORE, msg.str());
-}
-
-void SyncStartManager::broadcastFinalScore(const PlayerStageStats& pPlayerStageStats) {
-	std::stringstream msg = writeScoreMessage(pPlayerStageStats, false);
-    this->broadcast(FINAL_SCORE, msg.str());
-}
-
-void SyncStartManager::broadcastFinalCourseScore(const PlayerStageStats& pPlayerStageStats) {
-	std::stringstream msg = writeScoreMessage(pPlayerStageStats, true);
-    this->broadcast(FINAL_COURSE_SCORE, msg.str());
-}
-
-std::stringstream SyncStartManager::writeScoreMessage(const PlayerStageStats& pPlayerStageStats, bool isCourseScore) const {
-    std::stringstream msg;
-
-    std::string playerName = PROFILEMAN->GetPlayerName(pPlayerStageStats.m_player_number);
-
-    if (playerName.empty()) {
-        playerName = "NoName";
-    }
-
-    if (isCourseScore && GAMESTATE->IsCourseMode()) {
-        Course* currentCourse = GAMESTATE->m_pCurCourse;
-
-        if (currentCourse != nullptr) {
-            std::string courseString = CourseToString(*currentCourse);
-            msg << courseString << '|';
-        }
-        else {
-            msg << "NullCourse" << '|';
-        }
-    }
-    else {
-        msg << activeSyncStartSong << '|';
-    }
-
-    msg << (int) pPlayerStageStats.m_player_number << '|';
-    msg << playerName << '|';
-    msg << pPlayerStageStats.m_iActualDancePoints << '|';
-    msg << pPlayerStageStats.m_iCurPossibleDancePoints << '|';
-    msg << pPlayerStageStats.m_iPossibleDancePoints << '|';
-    msg << formatScore(pPlayerStageStats) << '|';
-    msg << pPlayerStageStats.GetCurrentLife() << '|';
-    msg << (pPlayerStageStats.m_bFailed ? '1' : '0') << '|';
-
-    for (int m_iTapNoteScore : pPlayerStageStats.m_iTapNoteScores) {
-        msg << m_iTapNoteScore << '|';
-    }
-
-    for (int m_iHoldNoteScore : pPlayerStageStats.m_iHoldNoteScores) {
-        msg << m_iHoldNoteScore << '|';
-    }
-
-	int possibleHolds = (int) pPlayerStageStats.m_radarPossible[RadarCategory_Holds];
-	int possibleRolls = (int) pPlayerStageStats.m_radarPossible[RadarCategory_Rolls];
-	int totalHolds = possibleHolds + possibleRolls;
-
-	msg << totalHolds;
-
-    return msg;
-}
-
-void SyncStartManager::broadcastMarathonSongLoading() {
-    this->broadcast(MARATHON_SONG_LOADING, "");
-}
-
-void SyncStartManager::broadcastMarathonSongReady() {
-    this->broadcast(MARATHON_SONG_READY, "");
-}
-
-void SyncStartManager::receiveScoreChange(struct in_addr in_addr, const std::string& msg) {
-	if (this->activeSyncStartSong.empty()) {
-		return;
-	}
-
-	ScorePlayer scorePlayer = {
-		.machineAddress = in_addr
-	};
-
-	ScoreData scoreData;
-
-	try {
-		std::vector<std::string> items = split(msg, "|");
-
-		// ignore messages that don't fit the size the message should be
-		if (items.size() != ALL_ITEMS_LENGTH) {
-			return;
-		}
-
-		auto iter = items.begin();
-
-		// ignore scores for other than current song
-		std::string& songName = *iter++;
-		if (songName != this->activeSyncStartSong) {
-			return;
-		}
-
-		scorePlayer.playerNumber = (PlayerNumber) std::stoi(*iter++);
-		scorePlayer.playerName = *iter++;
-		scoreData.actualDancePoints = std::stoi(*iter++);
-		scoreData.currentPossibleDancePoints = std::stoi(*iter++);
-		scoreData.possibleDancePoints = std::stoi(*iter++);
-		scoreData.formattedScore = *iter++;
-		scoreData.life = std::stof(*iter++);
-		scoreData.failed = *iter++ == "1";
-
-		for (int & tapNoteScore : scoreData.tapNoteScores) {
-			tapNoteScore = std::stoi(*iter++);
-		}
-
-		for (int & holdNoteScore : scoreData.holdNoteScores) {
-			holdNoteScore = std::stoi(*iter++);
-		}
-
-		scoreData.totalHolds = std::stoi(*iter++);
-
-		this->syncStartScoreKeeper.AddScore(scorePlayer, scoreData);
-		MESSAGEMAN->Broadcast("SyncStartPlayerScoresChanged");
-	} catch (std::exception& e) {
-		// just don't crash!
-		LOG->Warn("Could not parse score change '%s'", msg.c_str());
-	}
-}
-
-void SyncStartManager::disable()
+static std::int64_t readInt64(char* buffer)
 {
-	if (this->socketfd > 0)
-	{
-		shutdown(this->socketfd, SHUT_RDWR);
-		close(this->socketfd);
-	}
-
-	this->enabled = false;
+	return (std::int64_t)(
+		(std::uint64_t(std::uint8_t(buffer[0])) << 56) |
+		(std::uint64_t(std::uint8_t(buffer[1])) << 48) |
+		(std::uint64_t(std::uint8_t(buffer[2])) << 40) |
+		(std::uint64_t(std::uint8_t(buffer[3])) << 32) |
+		(std::uint64_t(std::uint8_t(buffer[4])) << 24) |
+		(std::uint64_t(std::uint8_t(buffer[5])) << 16) |
+		(std::uint64_t(std::uint8_t(buffer[6])) <<  8) |
+		(std::uint64_t(std::uint8_t(buffer[7])) <<  0)
+	);
 }
 
-int SyncStartManager::getNextMessage(char* buffer, sockaddr_in* remaddr, size_t bufferSize) {
-	socklen_t addrlen = sizeof remaddr;
-	return recvfrom(this->socketfd, buffer, bufferSize, MSG_DONTWAIT, (struct sockaddr *) remaddr, &addrlen);
+static void writeInt64(std::int64_t x, char* buffer)
+{
+	buffer[0] = (((std::uint64_t)x) >> 56) & 0xff;
+	buffer[1] = (((std::uint64_t)x) >> 48) & 0xff;
+	buffer[2] = (((std::uint64_t)x) >> 40) & 0xff;
+	buffer[3] = (((std::uint64_t)x) >> 32) & 0xff;
+	buffer[4] = (((std::uint64_t)x) >> 24) & 0xff;
+	buffer[5] = (((std::uint64_t)x) >> 16) & 0xff;
+	buffer[6] = (((std::uint64_t)x) >>  8) & 0xff;
+	buffer[7] = (((std::uint64_t)x) >>  0) & 0xff;
 }
 
-void SyncStartManager::Update() {
-	if (!this->enabled) {
-		return;
-	}
+static void broadcastSongOrCourseReady(int socketfd, const std::string& songOrCourse, SyncStartOpcode opcode, std::int64_t startFrame)
+{
+	LOG->Info("Broadcasting %s frame %ld song \"%s\"",
+		opcode == SyncStartReadyToStart ? "SyncStartReadyToStart" : "SyncStartReadyToPreview",
+		startFrame,
+		songOrCourse.c_str());
 
 	char buffer[BUFSIZE];
-	int received;
+	buffer[0] = opcode;
+	writeInt64(startFrame, &buffer[1]);
+	std::size_t totalLength = 9 + songOrCourse.copy(buffer + 9, BUFSIZE - 9, 0);
+	broadcast(socketfd, buffer, totalLength);
+}
+
+void SyncStartManager::broadcastReadyToStartSong(const Song& song, std::int64_t startFrame)
+{
+	this->bShouldStall = true;
+	broadcastSongOrCourseReady(this->socketfd, SongToString(song), SyncStartReadyToStart, startFrame);
+}
+
+void SyncStartManager::broadcastReadyToStartCourse(const Course& course, std::int64_t startFrame)
+{
+	broadcastSongOrCourseReady(this->socketfd, CourseToString(course), SyncStartReadyToStart, startFrame);
+}
+
+void SyncStartManager::broadcastReadyToPreviewSong(const Song& song, std::int64_t startFrame)
+{
+	broadcastSongOrCourseReady(this->socketfd, SongToString(song), SyncStartReadyToPreview, startFrame);
+}
+
+void SyncStartManager::broadcastReadyToPreviewCourse(const Course& course, std::int64_t startFrame)
+{
+	broadcastSongOrCourseReady(this->socketfd, CourseToString(course), SyncStartReadyToPreview, startFrame);
+}
+
+void SyncStartManager::Update()
+{
+	char buffer[BUFSIZE];
 	struct sockaddr_in remaddr;
+	socklen_t addrlen = sizeof(remaddr);
 
 	// loop through packets received
-	do {
-		received = getNextMessage(buffer, &remaddr, sizeof(buffer));
-		if (received > 0) {
-			char opcode = buffer[0];
-			std::string msg = std::string(buffer + 1, received - 1);
+	int received;
 
-			if (opcode == SONG && this->waitingForSongChanges) {
-				this->songOrCourseWaitingToBeChangedTo = msg;
-				this->lastBroadcastedSongOrCourse = msg;
-			} else if (opcode == START && this->waitingForSynchronizedStarting) {
-				if (msg == activeSyncStartSong) {
-					this->shouldStart = true;
+	while( true )
+	{
+		received = recvfrom(this->socketfd, buffer, sizeof(buffer), MSG_DONTWAIT, (struct sockaddr *) &remaddr, &addrlen);
+		if( received <= 0 ) break;
+
+		switch( buffer[0] )
+		{
+
+			case SyncStartSongSelected:
+			{
+				std::string song = std::string(&buffer[1], received - 1);
+				LOG->Info("Received SyncStartSongSelected song \"%s\"", song.c_str());
+				this->songOrCourseWaitingToBeChangedTo = song;
+				this->lastBroadcastedSongOrCourse = song;
+				break;
+			}
+
+			case SyncStartReadyToPreview:
+			{
+				std::int64_t startFrame = readInt64(&buffer[1]);
+				std::string song = std::string(&buffer[9], received - 9);
+
+				LOG->Info("Received SyncStartReadyToPreview frame %ld song \"%s\"", startFrame, song.c_str());
+
+				if( song != this->previewSong )
+				{
+					this->shouldPreview = false;
+					this->previewSong = song;
+					this->previewSongMachinesWaiting = 1;
+					this->previewSongStartFrame = startFrame;
 				}
-			} else if (opcode == SCORE) {
-				this->receiveScoreChange(remaddr.sin_addr, msg);
-            } else if (opcode == MARATHON_SONG_LOADING) {
-                this->machinesLoadingNextSongCounter++;
-                LOG->Info("MARATHON_SONG_LOADING, counter=%d", this->machinesLoadingNextSongCounter);
-            } else if (opcode == MARATHON_SONG_READY) {
-                this->machinesLoadingNextSongCounter--;
-                LOG->Info("MARATHON_SONG_READY, counter=%d", this->machinesLoadingNextSongCounter);
-                if (this->machinesLoadingNextSongCounter == 0) {
-                    this->shouldStart = true;
-                }
-            }
+				else
+				{
+					this->previewSongMachinesWaiting = std::max(0, this->previewSongMachinesWaiting - 1);
+					this->previewSongStartFrame = std::max(startFrame, this->previewSongStartFrame);
+					this->shouldPreview = this->previewSongMachinesWaiting == 0;
+				}
+				break;
+			}
+
+			case SyncStartReadyToStart:
+			{
+				std::int64_t startFrame = readInt64(&buffer[1]);
+				std::string song = std::string(&buffer[9], received - 9);
+
+				LOG->Info("Received SyncStartReadyToStart frame %ld song \"%s\"", startFrame, song.c_str());
+
+				if( song != this->activeSong )
+				{
+					this->shouldStart = false;
+					this->activeSong = song;
+					this->activeSongMachinesWaiting = MACHINES - 1;
+					this->activeSongStartFrame = startFrame;
+				}
+				else
+				{
+					this->activeSongMachinesWaiting = std::max(0, this->activeSongMachinesWaiting - 1);
+					this->activeSongStartFrame = std::max(startFrame, this->activeSongStartFrame);
+					this->shouldStart = this->activeSongMachinesWaiting == 0;
+					if (this->shouldStart) this->bShouldStall = false;
+				}
+				break;
+			}
 		}
-	} while (received > 0);
-}
-
-std::vector<SyncStartScore> SyncStartManager::GetCurrentPlayerScores() {
-	return this->syncStartScoreKeeper.GetScores(false);
-}
-
-std::vector<SyncStartScore> SyncStartManager::GetLatestPlayerScores() {
-	return this->syncStartScoreKeeper.GetScores(true);
-}
-
-void SyncStartManager::ListenForSongChanges(bool enabled) {
-	LOG->Info("Listen for song changes: %d", enabled);
-	this->waitingForSongChanges = enabled;
-	this->songOrCourseWaitingToBeChangedTo = "";
-	this->lastBroadcastedSongOrCourse = "";
-}
-
-std::string SyncStartManager::GetSongOrCourseToChangeTo() {
-	std::string songOrCourse = this->songOrCourseWaitingToBeChangedTo;
-
-	if (!songOrCourse.empty()) {
-		this->songOrCourseWaitingToBeChangedTo = "";
-		return songOrCourse;
-	} else {
-		return "";
 	}
 }
 
-void SyncStartManager::StartListeningForSynchronizedStart(const Song& song) {
-	this->syncStartScoreKeeper.ResetScores();
-	this->activeSyncStartSong = SongToString(song);
+void SyncStartManager::EndCurrentSong()
+{
 	this->shouldStart = false;
-	this->waitingForSynchronizedStarting = true;
+	this->bShouldStall = false;
+	this->activeSong = "";
 }
 
-void SyncStartManager::StopListeningForSynchronizedStart() {
+std::string SyncStartManager::GetSongOrCourseToChangeTo()
+{
+	std::string songOrCourse = this->songOrCourseWaitingToBeChangedTo;
+	this->songOrCourseWaitingToBeChangedTo = "";
+	return songOrCourse;
+}
+
+bool SyncStartManager::AttemptPreview(std::int64_t& startFrame)
+{
+    if (!this->shouldPreview) return false;
+	startFrame = this->previewSongStartFrame;
+	this->shouldPreview = false;
+	return true;
+}
+
+bool SyncStartManager::AttemptStart(std::int64_t& startFrame)
+{
+    if (!this->shouldStart) return false;
+	startFrame = this->activeSongStartFrame;
 	this->shouldStart = false;
-	this->waitingForSynchronizedStarting = false;
+	return true;
 }
-
-bool SyncStartManager::AttemptStart() {
-    if (this->shouldStart) {
-        this->machinesLoadingNextSongCounter = 0;
-        this->shouldStart = false;
-        return true;
-    } else {
-        return false;
-    }
-}
-
-void SyncStartManager::SongChangedDuringGameplay(const Song& song) {
-	this->activeSyncStartSong = SongToString(song);
-}
-
-void SyncStartManager::StopListeningScoreChanges() {
-	this->activeSyncStartSong = "";
-}
-
-// lua start
-#include "LuaBinding.h"
-
-class LunaSyncStartManager: public Luna<SyncStartManager> {
-	public:
-		static void PushScores( T* p, lua_State *L, const std::vector<SyncStartScore>& scores )
-		{
-			lua_newtable( L );
-			int outer_table_index = lua_gettop(L);
-
-			int i = 0;
-			for (auto score = scores.begin(); score != scores.end(); score++) {
-				lua_newtable( L );
-				int inner_table_index = lua_gettop(L);
-
-				lua_pushstring(L, "playerName");
-				lua_pushstring(L, score->player.playerName.c_str());
-				lua_settable(L, inner_table_index);
-
-				lua_pushstring(L, "score");
-				lua_pushstring(L, score->data.formattedScore.c_str());
-				lua_settable(L, inner_table_index);
-
-				lua_pushstring(L, "failed");
-				lua_pushboolean(L, score->data.failed);
-				lua_settable(L, inner_table_index);
-
-				lua_rawseti(L, outer_table_index, i + 1);
-				i++;
-			}
-		}
-
-		static int IsEnabled( T* p, lua_State *L )
-		{
-			lua_pushboolean(L, p->isEnabled());
-			return 1;
-		}
-
-		static int GetCurrentPlayerScores( T* p, lua_State *L )
-		{
-			auto scores = p->GetCurrentPlayerScores();
-			PushScores(p, L, scores);
-			return 1;
-		}
-
-		static int GetLatestPlayerScores( T* p, lua_State *L )
-		{
-			auto scores = p->GetLatestPlayerScores();
-			PushScores(p, L, scores);
-			return 1;
-		}
-
-        static int BroadcastFinalScore( T* p, lua_State *L )
-        {
-            const PlayerStageStats* playerStageStats = Luna<PlayerStageStats>::check(L,1);
-            p->broadcastFinalScore(*playerStageStats);
-            return 1;
-        }
-
-        static int BroadcastFinalCourseScore( T* p, lua_State *L )
-        {
-            const PlayerStageStats* playerStageStats = Luna<PlayerStageStats>::check(L,1);
-            p->broadcastFinalCourseScore(*playerStageStats);
-            return 1;
-        }
-
-		LunaSyncStartManager()
-		{
-			ADD_METHOD(IsEnabled );
-			ADD_METHOD(GetCurrentPlayerScores);
-			ADD_METHOD(GetLatestPlayerScores);
-            ADD_METHOD(BroadcastFinalScore);
-            ADD_METHOD(BroadcastFinalCourseScore);
-		}
-};
-
-LUA_REGISTER_CLASS( SyncStartManager )
