@@ -68,6 +68,7 @@
 #include "Profile.h"
 #include "ActorUtil.h"
 #include "ver.h"
+#include "SyncStartManager.h"
 
 #include <cmath>
 #include <ctime>
@@ -1009,6 +1010,7 @@ int sm_main(int argc, char* argv[])
 	SONGMAN->UpdatePreferredSort();
 	NETWORK		= new NetworkManager;
 	STATSMAN	= new StatsManager;
+	SYNCMAN		= new SyncStartManager;
 
 	// Initialize which courses are ranking courses here.
 	SONGMAN->UpdateRankingCourses();
