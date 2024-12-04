@@ -14,6 +14,7 @@
 #include "GameState.h"
 #include "MemoryCardManager.h"
 #include "ScreenManager.h"
+#include "Screen.h"
 #include "InputFilter.h"
 #include "InputMapper.h"
 #include "RageFileManager.h"
@@ -271,8 +272,8 @@ void GameLoop::UpdateAllButDraw(bool bRunningFromVBLANK)
 
 	// If the constant update delta is set, use that value. Otherwise, use the delta
 	// time from the gameplay timer.
-	float fDeltaTime = (g_fConstantUpdateDeltaSeconds > 0) 
-		? g_fConstantUpdateDeltaSeconds 
+	float fDeltaTime = (g_fConstantUpdateDeltaSeconds > 0)
+		? g_fConstantUpdateDeltaSeconds
 		: g_GameplayTimer.GetDeltaTime();
 
 	// Use a static boolean to check the preference once per game launch.
@@ -285,25 +286,40 @@ void GameLoop::UpdateAllButDraw(bool bRunningFromVBLANK)
 
 	fDeltaTime *= g_fUpdateRate;
 
-	// Update SOUNDMAN early (before any RageSound::GetPosition calls), to flush position data.
-	SOUNDMAN->Update();
-
-	/* Update song beat information -before- calling update on all the classes that
-	 * depend on it. If you don't do this first, the classes are all acting on old
-	 * information and will lag. (but no longer fatally, due to timestamping -glenn) */
-	SOUND->Update(fDeltaTime);
-	TEXTUREMAN->Update(fDeltaTime);
-	GAMESTATE->Update(fDeltaTime);
-	SCREENMAN->Update(fDeltaTime);
-	MEMCARDMAN->Update();
 	SYNCMAN->Update();
 
-	/* Important: Process input AFTER updating game logic, or input will be
-	 * acting on song beat from last frame */
-	HandleInputEvents(fDeltaTime);
+	if( !SYNCMAN->IsWaiting() )
+	{
+		// Update SOUNDMAN early (before any RageSound::GetPosition calls), to flush position data.
+		SOUNDMAN->Update();
 
-	// Update the lights
-	LIGHTSMAN->Update(fDeltaTime);
+		/* Update song beat information -before- calling update on all the classes that
+		 * depend on it. If you don't do this first, the classes are all acting on old
+		 * information and will lag. (but no longer fatally, due to timestamping -glenn) */
+		SOUND->Update(fDeltaTime);
+		TEXTUREMAN->Update(fDeltaTime);
+		GAMESTATE->Update(fDeltaTime);
+		SCREENMAN->Update(fDeltaTime);
+		MEMCARDMAN->Update();
+
+		/* Important: Process input AFTER updating game logic, or input will be
+		 * acting on song beat from last frame */
+		HandleInputEvents(fDeltaTime);
+
+		// Update the lights
+		LIGHTSMAN->Update(fDeltaTime);
+	}
+	else
+	{
+		if( SCREENMAN->GetTopScreen()->IsFirstUpdate() )
+		{
+			// When waiting for sync start, we need to do one screen update
+			// to display the "Waiting" text and start receiving input
+			// events (START or BACK to skip waiting or to back out).
+			SCREENMAN->Update(fDeltaTime);
+		}
+		HandleInputEvents(fDeltaTime);
+	}
 }
 
 void GameLoop::RunGameLoop()
@@ -327,14 +343,14 @@ void GameLoop::RunGameLoop()
 		CheckFocus();
 
 		UpdateAllButDraw(false);
-		
+
 		// Check input devices every 255 frames (uint8_t can hold 0-255).
 		static uint8_t i_CheckInputDevices = 0;
 		if (++i_CheckInputDevices == 0)
 		{
 			CheckInputDevices();
 		}
-		
+
 		SCREENMAN->Draw();
 	}
 
