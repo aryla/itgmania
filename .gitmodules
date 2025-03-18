@@ -1,7 +1,7 @@
 [submodule "Themes/Simply-Love"]
 	path = Themes/Simply Love
 	url = https://github.com/aryla/Simply-Love-SM5.git
-	branch = itgmania-mckyla-5.6.0
+	branch = itgmania-latis-5.6.0
 	shallow = true
 [submodule "extern/ixwebsocket"]
 	path = extern/IXWebSocket
