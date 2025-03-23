@@ -289,7 +289,7 @@ void SongManager::AddGroup( RString sDir, RString sGroupDirName, Group* group )
 
 	// Look for a group banner in this group folder
 	std::vector<RString> arrayGroupBanners;
-	
+
 	// First check if there is a banner provided in pack.ini
 	if(!group->GetBannerPath().empty())
 	{
@@ -399,8 +399,9 @@ void SongManager::LoadSongDir( RString sDir, LoadingWindow *ld, bool onlyAdditio
 			ld->SetText(SANITY_CHECKING_GROUPS.GetValue() + ssprintf("\n%s",
 					Basename(sGroupDirName).c_str()));
 		}
+		// Sanity check disabled because it takes too long.
 		// TODO: If this check fails, log a warning instead of crashing.
-		SanityCheckGroupDir(sDir+sGroupDirName);
+		// SanityCheckGroupDir(sDir+sGroupDirName);
 
 		// Find all Song folders in this group directory
 		std::vector<RString> arraySongDirs;
@@ -423,7 +424,7 @@ void SongManager::LoadSongDir( RString sDir, LoadingWindow *ld, bool onlyAdditio
 
 	groupIndex = 0;
 	songIndex = 0;
-	
+
 	for (RString const &sGroupDirName : arrayGroupDirs)	// foreach dir in /Songs/
 	{
 		std::vector<RString> &arraySongDirs = arrayGroupSongDirs[groupIndex++];
@@ -435,7 +436,7 @@ void SongManager::LoadSongDir( RString sDir, LoadingWindow *ld, bool onlyAdditio
 		SongPointerVector& index_entry = m_mapSongGroupIndex[sGroupDirName];
 		RString group_base_name= Basename(sGroupDirName);
 		Group* group = new Group(sDir, sGroupDirName);
-		
+
 		// We need to keep track of previously loaded groups so we don't delete them if we're only loading additions
 		bool groupAlreadyLoaded = false;
 		// Add the group to the group mapping
@@ -950,7 +951,7 @@ std::vector<RString> SongManager::GetPreferredSortSectionNames() const
 	return sectionNames;
 
 }
-	
+
 void SongManager::GetPreferredSortCourses( CourseType ct, std::vector<Course*> &AddTo, bool bIncludeAutogen ) const
 {
 	if( m_vPreferredCourseSort.empty() )
@@ -1722,7 +1723,7 @@ std::map<int, std::vector<Song*>> SongManager::UpdateMeterSort( std::vector<Song
 			// Check if the meter is already in m_mapSongsByDifficulty
 			if (std::find(m_mapSongsByDifficulty[pSteps->GetMeter()].begin(), m_mapSongsByDifficulty[pSteps->GetMeter()].end(), apDifficultSongs[i]) != m_mapSongsByDifficulty[pSteps->GetMeter()].end())
 				continue;
-			else {			
+			else {
 				m_mapSongsByDifficulty[pSteps->GetMeter()].push_back(apDifficultSongs[i]);
 			}
 		}
@@ -1838,7 +1839,7 @@ void SongManager::SetPreferredSongs(RString sPreferredSongs, bool bIsAbsolute) {
 		// 		}
 		// 	}
 		// }
-		
+
 		m_vPreferredSongSort.push_back( PFSection );
 		m_mapPreferredSectionToSongs[PFSection.sName] = PFSection.vpSongs;
 	}
