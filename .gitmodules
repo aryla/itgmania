@@ -1,7 +1,3 @@
-[submodule "Themes/Simply-Love"]
-	path = Themes/Simply Love
-	url = https://github.com/Simply-Love/Simply-Love-SM5.git
-	shallow = true
 [submodule "extern/ixwebsocket"]
 	path = extern/IXWebSocket
 	url = https://github.com/machinezone/IXWebSocket.git
@@ -50,3 +46,7 @@
 	path = extern/hidapi
 	url = https://github.com/libusb/hidapi.git
 	shallow = true
+[submodule "Themes/Simply Love"]
+	path = Themes/Simply Love
+	url = https://github.com/aryla/Simply-Love-SM5.git
+	branch = itgmania-latis-5.7.0
