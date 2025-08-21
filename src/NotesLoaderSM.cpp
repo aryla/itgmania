@@ -1445,110 +1445,53 @@ void SMLoader::ParseBGChangesString(const RString& _sChanges, std::vector<std::v
 	if (sChanges.empty())
 		return;
 
-	// get the list of possible files/directories for the file parameters
-	std::vector<RString> vsFiles = GetSongDirFiles(sSongDir);
-
 	start = 0;
 	int pnum = 0;
 	do {
-		switch (pnum) {
-		// parameters 1 and 7 can be files or folder names
-		case 1:
-		case 7:
+		if(0 == pnum) vvsAddTo.push_back(std::vector<RString>()); // first value of this set. create our vector
+
+		size_t eqpos = sChanges.find('=', start);
+		size_t compos = sChanges.find(',', start);
+
+		if ((eqpos == RString::npos) && (compos == RString::npos))
 		{
-			// see if one of the files in the song directory are listed.
-			RString found;
-			for (const auto& f : vsFiles)
-			{
-				// there aren't enough characters for this to match
-				if ((sChanges.size() - start) < f.size())
-					continue;
-
-				// the string itself matches
-				if (f.EqualsNoCase(sChanges.substr(start, f.size()).c_str()))
-				{
-					size_t nextpos = start + f.size();
-
-					// is this name followed by end-of-string, equals, or comma?
-					if ((nextpos == sChanges.size()) || (sChanges[nextpos] == '=') || (sChanges[nextpos] == ','))
-					{
-						found = f;
-						break;
-					}
-				}
-			}
-			// yes. use that as this parameter, even if it has commas or equals signs in it
-			if (!found.empty())
-			{
-				vvsAddTo.back().push_back(found);
-				start += found.size();
-				// the next character should be a comma or equals. skip it
-				if (start < sChanges.size())
-				{
-					if (sChanges[start] == '=')
-						++pnum;
-					else
-					{
-						ASSERT(sChanges[start] == ',');
-						pnum = 0;
-					}
-					start += 1;
-				}
-				// move to the next parameter
-				break;
-			}
-			// deliberate fall-through if not found. treat it as a normal string like before
-			[[fallthrough]];
+			// neither = nor , were found in the remainder of the string. consume the rest of the string.
+			vvsAddTo.back().push_back(sChanges.substr(start));
+			start = sChanges.size() + 1;
 		}
-		// everything else should be safe
-		default:
-			if(0 == pnum) vvsAddTo.push_back(std::vector<RString>()); // first value of this set. create our vector
-
+		else if ((eqpos != RString::npos) && (compos != RString::npos))
+		{
+			// both were found. which came first?
+			if (eqpos < compos)
 			{
-				size_t eqpos = sChanges.find('=', start);
-				size_t compos = sChanges.find(',', start);
-
-				if ((eqpos == RString::npos) && (compos == RString::npos))
-				{
-					// neither = nor , were found in the remainder of the string. consume the rest of the string.
-					vvsAddTo.back().push_back(sChanges.substr(start));
-					start = sChanges.size() + 1;
-				}
-				else if ((eqpos != RString::npos) && (compos != RString::npos))
-				{
-					// both were found. which came first?
-					if (eqpos < compos)
-					{
-						// equals. consume value and move to next value
-						vvsAddTo.back().push_back(sChanges.substr(start, eqpos - start));
-						start = eqpos + 1;
-						++pnum;
-					}
-					else
-					{
-						// comma. consume value and move to next set
-						vvsAddTo.back().push_back(sChanges.substr(start, compos - start));
-						start = compos + 1;
-						pnum = 0;
-					}
-				}
-				else if (eqpos != RString::npos)
-				{
-					// found only equals. consume and move on.
-					vvsAddTo.back().push_back(sChanges.substr(start, eqpos - start));
-					start = eqpos + 1;
-					++pnum;
-				}
-				else
-				{
-					// only foudn comma. consume and move on.
-					vvsAddTo.back().push_back(sChanges.substr(start, compos - start));
-					start = compos + 1;
-					pnum = 0;
-				}
-				break;
+				// equals. consume value and move to next value
+				vvsAddTo.back().push_back(sChanges.substr(start, eqpos - start));
+				start = eqpos + 1;
+				++pnum;
+			}
+			else
+			{
+				// comma. consume value and move to next set
+				vvsAddTo.back().push_back(sChanges.substr(start, compos - start));
+				start = compos + 1;
+				pnum = 0;
 			}
 		}
+		else if (eqpos != RString::npos)
+		{
+			// found only equals. consume and move on.
+			vvsAddTo.back().push_back(sChanges.substr(start, eqpos - start));
+			start = eqpos + 1;
+			++pnum;
+		}
+		else
+		{
+			// only foudn comma. consume and move on.
+			vvsAddTo.back().push_back(sChanges.substr(start, compos - start));
+			start = compos + 1;
+			pnum = 0;
+		}
+		break;
 	} while (start <= sChanges.size());
 }
 
