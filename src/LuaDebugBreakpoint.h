@@ -2,6 +2,7 @@
 #define LUA_DEBUG_BREAKPOINT
 
 #include <string>
+#include <cstdint>
 
 struct lua_State;
 struct lua_Debug;

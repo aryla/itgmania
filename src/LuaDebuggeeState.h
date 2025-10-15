@@ -49,7 +49,7 @@ namespace LuaDebug
 		ThreadId GetThreadId() const { return m_threadId; }
 		int GetStackLevel() const { return m_stackLevel; }
 		const std::string &GetName() const { return m_name; }
-		const int GetIndex() const { return m_index; }
+		int GetIndex() const { return m_index; }
 
 		DebuggeeState &GetRoot();
 		DebuggeeState &GetThread();

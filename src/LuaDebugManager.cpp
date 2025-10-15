@@ -6,6 +6,7 @@
 #include "RageThreads.h"
 #include "arch/Socket/Socket.h"
 
+#include <climits>
 #include <mutex>
 #include <string_view>
 

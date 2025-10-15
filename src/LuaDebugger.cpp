@@ -557,7 +557,7 @@ namespace LuaDebug
 				std::string source = debug.source ? ResolvePath(debug.source) : "";
 				if( !source.empty() )
 				{
-					frameJson["source"]["name"] = debug.short_src ? debug.short_src : "";
+					frameJson["source"]["name"] = debug.short_src;
 					frameJson["source"]["path"] = source;
 				}
 
@@ -798,7 +798,7 @@ namespace LuaDebug
 			if( !anyHit ) return;
 
 			std::string source = ar->source ? ResolvePath(ar->source) : "";
-			std::string sourceName = (!source.empty() && ar->short_src) ? ar->short_src : "";
+			std::string sourceName = !source.empty() ? ar->short_src : "";
 			int lineNumber = ar->currentline > 0
 				? ar->currentline + m_client.linesOffset
 				: -1;
