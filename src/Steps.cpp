@@ -71,6 +71,17 @@ std::optional<StepParity::StageLayout> getLayout(StepsType ty) {
           },
           {2}, {1}, {0, 3});
 
+    case StepsType_dance_couple:
+      return StepParity::StageLayout(
+          StepsType_dance_couple,
+          {
+              {0, 1},  // Left
+              {1, 0},  // Down
+              {1, 2},  // Up
+              {2, 1}   // Right
+          },
+          {2}, {1}, {0, 3});
+
     case StepsType_dance_double:
       return StepParity::StageLayout(
           StepsType_dance_double,
@@ -86,6 +97,23 @@ std::optional<StepParity::StageLayout> getLayout(StepsType ty) {
               {5, 1}   // P2 Right
           },
           {2, 6}, {1, 5}, {0, 3, 4, 7});
+
+    case StepsType_dance_routine:
+      return StepParity::StageLayout(
+          StepsType_dance_routine,
+          {
+              {0, 1},  // P1 Left
+              {1, 0},  // P1 Down
+              {1, 2},  // P1 Up
+              {2, 1},  // P1 Right
+
+              {3, 1},  // P2 Left
+              {4, 0},  // P2 Down
+              {4, 2},  // P2 Up
+              {5, 1}   // P2 Right
+          },
+          {2, 6}, {1, 5}, {0, 3, 4, 7});
+
     default:
       return std::nullopt;
   }
@@ -360,36 +388,20 @@ void Steps::CalculateRadarValues(float fMusicLengthSeconds) {
           return;
   */
 
-  NoteData tempNoteData;
-  this->GetNoteData(tempNoteData);
-
   FOREACH_PlayerNumber(pn) m_CachedRadarValues[pn].Zero();
 
-  TimingData* timing = this->GetTimingData();
-  if (tempNoteData.IsComposite()) {
-    std::vector<NoteData> vParts;
+  NoteData tempNoteData;
+  GetNoteData(tempNoteData);
+  TimingData* timing = GetTimingData();
 
-    NoteDataUtil::SplitCompositeNoteData(tempNoteData, vParts);
-    for (size_t pn = 0; pn < std::min(vParts.size(), size_t(NUM_PLAYERS));
-         ++pn) {
+  std::vector<NoteData> splitNoteData;
+  if (NoteDataUtil::SplitCompositeOrStackedNoteData(
+          tempNoteData, splitNoteData, m_StepsType)) {
+    FOREACH_PlayerNumber(pn) {
       NoteDataUtil::CalculateRadarValues(
-          vParts[pn], fMusicLengthSeconds, timing, m_CachedRadarValues[pn]);
+          splitNoteData[pn], fMusicLengthSeconds, timing,
+          m_CachedRadarValues[pn]);
     }
-  } else if (
-      GAMEMAN->GetStepsTypeInfo(this->m_StepsType).m_StepsTypeCategory ==
-      StepsTypeCategory_Couple) {
-    NoteData p1 = tempNoteData;
-    // XXX: Assumption that couple will always have an even number of notes.
-    const int tracks = tempNoteData.GetNumTracks() / 2;
-    p1.SetNumTracks(tracks);
-    NoteDataUtil::CalculateRadarValues(
-        p1, fMusicLengthSeconds, timing, m_CachedRadarValues[PLAYER_1]);
-    // at this point, p2 is tempNoteData.
-    NoteDataUtil::ShiftTracks(tempNoteData, tracks);
-    tempNoteData.SetNumTracks(tracks);
-    NoteDataUtil::CalculateRadarValues(
-        tempNoteData, fMusicLengthSeconds, timing,
-        m_CachedRadarValues[PLAYER_2]);
   } else {
     NoteDataUtil::CalculateRadarValues(
         tempNoteData, fMusicLengthSeconds, timing, m_CachedRadarValues[0]);
@@ -408,9 +420,6 @@ void Steps::CalculateTechCounts() {
     return;
   }
 
-  NoteData tempNoteData;
-  this->GetNoteData(tempNoteData);
-
   FOREACH_PlayerNumber(pn) m_CachedTechCounts[pn].Zero();
 
   const std::optional<StepParity::StageLayout> layout =
@@ -420,13 +429,28 @@ void Steps::CalculateTechCounts() {
   if (!layout) {
     return;
   }
-  TimingData* timing = this->GetTimingData();
-  StepParity::StepParityGenerator gen =
-      StepParity::StepParityGenerator(&*layout, timing);
-  gen.analyzeNoteData(tempNoteData);
-  TechCounts::CalculateTechCountsFromRows(
-      gen.rows, &*layout, m_CachedTechCounts[0]);
-  std::fill_n(m_CachedTechCounts + 1, NUM_PLAYERS - 1, m_CachedTechCounts[0]);
+
+  NoteData tempNoteData;
+  GetNoteData(tempNoteData);
+  TimingData* timing = GetTimingData();
+
+  std::vector<NoteData> splitNoteData;
+  if (NoteDataUtil::SplitCompositeOrStackedNoteData(
+          tempNoteData, splitNoteData, m_StepsType)) {
+    FOREACH_PlayerNumber(pn) {
+      StepParity::StepParityGenerator gen{&*layout, timing};
+      gen.analyzeNoteData(splitNoteData[pn]);
+      TechCounts::CalculateTechCountsFromRows(
+          gen.rows, &*layout, m_CachedTechCounts[pn]);
+    }
+  } else {
+    StepParity::StepParityGenerator gen =
+        StepParity::StepParityGenerator(&*layout, timing);
+    gen.analyzeNoteData(tempNoteData);
+    TechCounts::CalculateTechCountsFromRows(
+        gen.rows, &*layout, m_CachedTechCounts[0]);
+    std::fill_n(m_CachedTechCounts + 1, NUM_PLAYERS - 1, m_CachedTechCounts[0]);
+  }
 }
 
 void Steps::CalculateMeasureInfo() {
@@ -439,35 +463,20 @@ void Steps::CalculateMeasureInfo() {
     return;
   }
 
-  NoteData tempNoteData;
-  this->GetNoteData(tempNoteData);
-
   std::vector<MeasureInfo> measureInfoPerPlayer;
 
-  TimingData* timing = this->GetTimingData();
-  if (tempNoteData.IsComposite()) {
+  NoteData tempNoteData;
+  GetNoteData(tempNoteData);
+  TimingData* timing = GetTimingData();
+
+  std::vector<NoteData> splitNoteData;
+  if (NoteDataUtil::SplitCompositeOrStackedNoteData(
+          tempNoteData, splitNoteData, m_StepsType)) {
     measureInfoPerPlayer.resize(NUM_PLAYERS);
-    std::vector<NoteData> vParts;
-    NoteDataUtil::SplitCompositeNoteData(tempNoteData, vParts);
-    for (std::size_t pn = 0;
-         pn < std::min(vParts.size(), std::size_t(NUM_PLAYERS)); ++pn) {
+    FOREACH_PlayerNumber(pn) {
       MeasureInfo::CalculateMeasureInfo(
-          vParts[pn], timing, measureInfoPerPlayer[pn]);
+          splitNoteData[pn], timing, measureInfoPerPlayer[pn]);
     }
-  } else if (
-      GAMEMAN->GetStepsTypeInfo(this->m_StepsType).m_StepsTypeCategory ==
-      StepsTypeCategory_Couple) {
-    measureInfoPerPlayer.resize(NUM_PLAYERS);
-    NoteData p1 = tempNoteData;
-    // XXX: Assumption that couple will always have an even number of notes.
-    const int tracks = tempNoteData.GetNumTracks() / 2;
-    p1.SetNumTracks(tracks);
-    MeasureInfo::CalculateMeasureInfo(
-        tempNoteData, timing, measureInfoPerPlayer[PLAYER_1]);
-    NoteDataUtil::ShiftTracks(tempNoteData, tracks);
-    tempNoteData.SetNumTracks(tracks);
-    MeasureInfo::CalculateMeasureInfo(
-        tempNoteData, timing, measureInfoPerPlayer[PLAYER_2]);
   } else {
     measureInfoPerPlayer.resize(1);
     MeasureInfo::CalculateMeasureInfo(

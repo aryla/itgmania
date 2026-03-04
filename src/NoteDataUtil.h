@@ -34,6 +34,14 @@ void LoadFromSMNoteDataString(
     NoteData& out, const std::string& sSMNoteData, bool bComposite);
 void GetSMNoteDataString(const NoteData& in, std::string& notes_out);
 void SplitCompositeNoteData(const NoteData& in, std::vector<NoteData>& out);
+/**
+ * @brief Similar to SplitCompositeNoteData, but will also separate couple note
+ * data.
+ *
+ * @return true if the NoteData was split, otherwise false.
+ */
+bool SplitCompositeOrStackedNoteData(
+    const NoteData& in, std::vector<NoteData>& out, StepsType stepsType);
 void CombineCompositeNoteData(NoteData& out, const std::vector<NoteData>& in);
 /**
  * @brief Autogenerate notes from one type to another.
