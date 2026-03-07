@@ -156,6 +156,7 @@ PlayerInfo::PlayerInfo()
       m_pSecondaryScoreDisplay(nullptr),
       m_pPrimaryScoreKeeper(nullptr),
       m_pSecondaryScoreKeeper(nullptr),
+      m_bOwnsSecondaryScoreKeeper(true),
       m_ptextPlayerOptions(nullptr),
       m_pActiveAttackList(nullptr),
       m_NoteData(),
@@ -223,8 +224,18 @@ void PlayerInfo::Load(
     m_pSecondaryScoreDisplay->Init(pPlayerState, pPlayerStageStats);
   }
 
+  m_bOwnsSecondaryScoreKeeper = true;
+
+  std::string sPrimaryScoreKeeperClass = SCORE_KEEPER_CLASS;
+  const Style* pStyle = GAMESTATE->GetCurrentStyle(pn);
+  if (pStyle != nullptr &&
+      pStyle->m_StyleType == StyleType_TwoPlayersSharedSides) {
+    // Shared-sides keeps per-player scoring on normal scorekeepers.
+    sPrimaryScoreKeeperClass = "ScoreKeeperNormal";
+  }
+
   m_pPrimaryScoreKeeper = ScoreKeeper::MakeScoreKeeper(
-      SCORE_KEEPER_CLASS, pPlayerState, pPlayerStageStats);
+      sPrimaryScoreKeeperClass, pPlayerState, pPlayerStageStats);
 
   switch (GAMESTATE->m_PlayMode) {
     case PLAY_MODE_RAVE:
@@ -267,7 +278,11 @@ PlayerInfo::~PlayerInfo() {
   RageUtil::SafeDelete(m_pPrimaryScoreDisplay);
   RageUtil::SafeDelete(m_pSecondaryScoreDisplay);
   RageUtil::SafeDelete(m_pPrimaryScoreKeeper);
-  RageUtil::SafeDelete(m_pSecondaryScoreKeeper);
+  if (m_bOwnsSecondaryScoreKeeper) {
+    RageUtil::SafeDelete(m_pSecondaryScoreKeeper);
+  } else {
+    m_pSecondaryScoreKeeper = nullptr;
+  }
   RageUtil::SafeDelete(m_ptextPlayerOptions);
   RageUtil::SafeDelete(m_pActiveAttackList);
   RageUtil::SafeDelete(m_pPlayer);
@@ -381,6 +396,7 @@ std::vector<PlayerInfo>::iterator GetNextVisiblePlayerInfo(
 ScreenGameplay::ScreenGameplay() {
   m_pSongBackground = nullptr;
   m_pSongForeground = nullptr;
+  m_pRoutineSharedScoreKeeper = nullptr;
   m_delaying_ready_announce = false;
   GAMESTATE->m_AdjustTokensBySongCostForFinalStageCheck = false;
 }
@@ -436,6 +452,28 @@ void ScreenGameplay::Init() {
   ScreenWithMenuElements::Init();
 
   this->FillPlayerInfo(m_vPlayerInfo);
+
+  const Style* pMasterStyle =
+      GAMESTATE->GetCurrentStyle(GAMESTATE->GetMasterPlayerNumber());
+  const bool bSharedSidesStyle =
+      pMasterStyle != nullptr &&
+      pMasterStyle->m_StyleType == StyleType_TwoPlayersSharedSides;
+  if (bSharedSidesStyle) {
+    const PlayerNumber master = GAMESTATE->GetMasterPlayerNumber();
+    PlayerInfo& masterInfo = m_vPlayerInfo[master];
+    m_pRoutineSharedScoreKeeper = ScoreKeeper::MakeScoreKeeper(
+        "ScoreKeeperShared", masterInfo.GetPlayerState(),
+        &STATSMAN->m_CurStageStats.m_RoutinePlayer);
+
+    FOREACH_EnabledPlayerNumberInfo(m_vPlayerInfo, pi) {
+      if (pi->m_pSecondaryScoreKeeper != nullptr &&
+          pi->m_bOwnsSecondaryScoreKeeper) {
+        RageUtil::SafeDelete(pi->m_pSecondaryScoreKeeper);
+      }
+      pi->m_pSecondaryScoreKeeper = m_pRoutineSharedScoreKeeper;
+      pi->m_bOwnsSecondaryScoreKeeper = false;
+    }
+  }
 
   {
     ASSERT_M(
@@ -520,6 +558,9 @@ void ScreenGameplay::Init() {
   FOREACH_PlayerNumber(pn) {
     STATSMAN->m_CurStageStats.m_player[pn].m_pStyle =
         GAMESTATE->GetCurrentStyle(pn);
+  }
+  if (bSharedSidesStyle) {
+    STATSMAN->m_CurStageStats.m_RoutinePlayer.m_pStyle = pMasterStyle;
   }
   FOREACH_MultiPlayer(pn) {
     STATSMAN->m_CurStageStats.m_multiPlayer[pn].m_pStyle =
@@ -870,7 +911,14 @@ void ScreenGameplay::Init() {
       pi.GetPlayerStageStats()->m_vpPossibleSteps = pi.m_vpStepsQueue;
     }
   }
+  if (bSharedSidesStyle) {
+    const PlayerNumber master = GAMESTATE->GetMasterPlayerNumber();
+    STATSMAN->m_CurStageStats.m_RoutinePlayer.m_vpPossibleSteps =
+        m_vPlayerInfo[master].m_vpStepsQueue;
+    STATSMAN->m_CurStageStats.m_RoutinePlayer.m_bJoined = true;
+  }
 
+  bool bLoadedRoutineSharedKeeper = false;
   FOREACH_EnabledPlayerInfo(m_vPlayerInfo, pi) {
     ASSERT(!pi->m_vpStepsQueue.empty());
     if (pi->GetPlayerStageStats()) {
@@ -881,6 +929,12 @@ void ScreenGameplay::Init() {
           m_apSongsQueue, pi->m_vpStepsQueue, pi->m_asModifiersQueue);
     }
     if (pi->m_pSecondaryScoreKeeper) {
+      if (pi->m_pSecondaryScoreKeeper == m_pRoutineSharedScoreKeeper) {
+        if (bLoadedRoutineSharedKeeper) {
+          continue;
+        }
+        bLoadedRoutineSharedKeeper = true;
+      }
       pi->m_pSecondaryScoreKeeper->Load(
           m_apSongsQueue, pi->m_vpStepsQueue, pi->m_asModifiersQueue);
     }
@@ -1030,6 +1084,7 @@ ScreenGameplay::~ScreenGameplay() {
   }
 
   RageUtil::SafeDelete(m_pCombinedLifeMeter);
+  RageUtil::SafeDelete(m_pRoutineSharedScoreKeeper);
   if (m_pSoundMusic) {
     m_pSoundMusic->StopPlaying();
   }
@@ -1206,6 +1261,7 @@ void ScreenGameplay::LoadNextSong() {
   SetupSong(iPlaySongIndex);
 
   Song* pSong = GAMESTATE->m_pCurSong;
+  bool bSentRoutineSharedOnNextSong = false;
   FOREACH_EnabledPlayerInfo(m_vPlayerInfo, pi) {
     Steps* pSteps = GAMESTATE->m_pCurSteps[pi->GetStepsAndTrailIndex()];
     ++pi->GetPlayerStageStats()->m_iStepsPlayed;
@@ -1259,9 +1315,18 @@ void ScreenGameplay::LoadNextSong() {
           &pi->m_pPlayer->GetNoteData());
     }
     if (pi->m_pSecondaryScoreKeeper) {
-      pi->m_pSecondaryScoreKeeper->OnNextSong(
-          GAMESTATE->GetCourseSongIndex(), pSteps,
-          &pi->m_pPlayer->GetNoteData());
+      const bool bIsRoutineSharedKeeper =
+          pi->m_pSecondaryScoreKeeper == m_pRoutineSharedScoreKeeper;
+      const bool bShouldCallSecondary =
+          !bIsRoutineSharedKeeper || !bSentRoutineSharedOnNextSong;
+      if (bShouldCallSecondary) {
+        if (bIsRoutineSharedKeeper) {
+          bSentRoutineSharedOnNextSong = true;
+        }
+        pi->m_pSecondaryScoreKeeper->OnNextSong(
+            GAMESTATE->GetCourseSongIndex(), pSteps,
+            &pi->m_pPlayer->GetNoteData());
+      }
     }
 
     // Don't mess with the PlayerController of the Dummy player
@@ -1921,9 +1986,9 @@ void ScreenGameplay::Update(float fDeltaTime) {
             pi->GetPlayerStageStats()->m_bFailed = true;  // fail
           }
         }
-        STATSMAN->m_CurStageStats.m_RoutinePlayer.AddRoutineStats(
-            m_vPlayerInfo[PLAYER_1].GetPlayerStageStats(),
-            m_vPlayerInfo[PLAYER_2].GetPlayerStageStats());
+        // STATSMAN->m_CurStageStats.m_RoutinePlayer.AddRoutineStats(
+        //     m_vPlayerInfo[PLAYER_1].GetPlayerStageStats(),
+        //     m_vPlayerInfo[PLAYER_2].GetPlayerStageStats());
       }
 
       /* Set STATSMAN->m_CurStageStats.bFailed for failed players.  In,
