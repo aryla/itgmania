@@ -3510,6 +3510,14 @@ class LunaScreenGameplay : public Luna<ScreenGameplay> {
     }
     LifeMeter* pLM = pi->m_pLifeMeter;
     if (pLM == nullptr) {
+      const CombinedLifeMeterShared* pShared =
+          dynamic_cast<const CombinedLifeMeterShared*>(
+              p->GetCombinedLifeMeter());
+      if (pShared != nullptr) {
+        pLM = pShared->GetInnerLifeMeter();
+      }
+    }
+    if (pLM == nullptr) {
       return 0;
     }
 
