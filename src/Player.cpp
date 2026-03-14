@@ -2262,37 +2262,6 @@ void Player::Step(
   }
 
   const int iSongRow = row == -1 ? BeatToNoteRow(fSongBeat) : row;
-  // If we're playinng on TwoPlayerSharedSides, we need to check player number
-  // to determine which side of the screen we're on.
-  if (GAMESTATE->GetCurrentStyle(m_pPlayerState->m_PlayerNumber)->m_StyleType ==
-      StyleType_TwoPlayersSharedSides) {
-    const int iStepSearchRows =
-        std::max(
-            BeatToNoteRow(m_Timing->GetBeatFromElapsedTime(
-                m_pPlayerState->m_Position.m_fMusicSeconds +
-                StepSearchDistance)) -
-                iSongRow,
-            iSongRow - BeatToNoteRow(m_Timing->GetBeatFromElapsedTime(
-                           m_pPlayerState->m_Position.m_fMusicSeconds -
-                           StepSearchDistance))) +
-        ROWS_PER_BEAT;
-    int iRowOfOverlappingNoteOrRow = row;
-    if (row == -1) {
-      iRowOfOverlappingNoteOrRow = GetClosestNote(
-          col, iSongRow, iStepSearchRows, iStepSearchRows, false);
-    }
-    TapNote* pTN = nullptr;
-    NoteData::iterator iter =
-        m_NoteData.FindTapNote(col, iRowOfOverlappingNoteOrRow);
-    DEBUG_ASSERT(iter != m_NoteData.end(col));
-    pTN = &iter->second;
-
-    if (pTN->pn != PLAYER_INVALID &&
-        pTN->pn != m_pPlayerState->m_PlayerNumber) {
-      return;
-    }
-  }
-
   if (col != -1 && !bRelease) {
     // Update roll life
     // Let's not check the whole array every time.
