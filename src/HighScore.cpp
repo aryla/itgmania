@@ -205,7 +205,7 @@ XNode* HighScoreImpl::CreateNode() const {
     for (size_t i = 0; i < playerNames.size(); ++i) {
       XNode* pPlayerNode =
           pRoutineNode->AppendChild(PlayerNumberToString((PlayerNumber)i));
-      pPlayerNode->AppendChild("Grade", playerGrades[i]);
+      pPlayerNode->AppendChild("Grade", GradeToString(playerGrades[i]));
       pPlayerNode->AppendChild("Score", playerScores[i]);
       pPlayerNode->AppendChild("PercentDP", playerPercentDPs[i]);
       pPlayerNode->AppendChild("MaxCombo", playerMaxCombos[i]);
